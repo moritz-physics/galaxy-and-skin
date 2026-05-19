@@ -1,0 +1,26 @@
+[project]
+name = "galaxy-uq"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "h5py>=3.16.0",
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.6",
+    "pillow>=12.2.0",
+    "requests>=2.34.2",
+    "scikit-image>=0.26.0",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.1",
+    "torch>=2.12.0",
+    "torchvision>=0.27.0",
+    "tqdm>=4.67.3",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.2.0",
+    "jupyterlab>=4.5.7",
+    "ruff>=0.15.13",
+]
