@@ -44,11 +44,11 @@ logger = logging.getLogger("03_logreg")
 SAVE_KWARGS: dict = {"dpi": 150, "bbox_inches": "tight"}
 
 HP_GRID: list[dict] = [
-    {"C": 0.01, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
     {"C": 0.1, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
     {"C": 1.0, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
     {"C": 10.0, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
     {"C": 100.0, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
+    {"C": 1000.0, "lr": 0.05, "max_iter": 1000, "tol": 1e-6},
 ]
 
 

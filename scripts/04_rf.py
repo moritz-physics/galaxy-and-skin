@@ -43,8 +43,8 @@ logger = logging.getLogger("04_rf")
 
 SAVE_KWARGS: dict = {"dpi": 150, "bbox_inches": "tight"}
 
-N_ESTIMATORS_GRID: tuple[int, ...] = (50, 200, 500)
-MAX_DEPTH_GRID: tuple[int | None, ...] = (10, 30, None)
+N_ESTIMATORS_GRID: tuple[int, ...] = (200, 500, 1000)
+MAX_DEPTH_GRID: tuple[int | None, ...] = (20, 50, None)
 
 
 def build_hp_grid() -> list[dict]:
