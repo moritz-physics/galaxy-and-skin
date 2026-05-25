@@ -7,8 +7,8 @@ class machine in a couple of hours when bundled into a five-model ensemble.
 Predictive Uncertainty Estimation using Deep Ensembles* (NeurIPS 2017): the
 ensemble is built by training independent networks from different random
 initialisations on the same data, with class weights computed from the
-training labels and image-space augmentation (per-sample horizontal flip,
-batch-uniform 90° rotation) applied during training only.
+training labels and per-sample image-space augmentation (independent
+horizontal flip and 90° rotation per sample) applied during training only.
 """
 
 from __future__ import annotations
@@ -75,19 +75,28 @@ class GalaxyCNN(nn.Module):
 
 
 def _augment_batch(x: torch.Tensor) -> torch.Tensor:
-    """Per-sample horizontal flip + batch-uniform random 90° rotation.
+    """Per-sample horizontal flip + per-sample random 90° rotation.
 
     Galaxies have no canonical orientation so multiples of 90° are exact
-    label-preserving augmentations. Per-sample flip is implemented by
-    masking; rotation is applied once per batch to keep things fast while
-    still exposing the network to a different orientation each step.
+    label-preserving augmentations. Both the flip and the rotation choice are
+    drawn independently for each sample in the batch: this exposes the
+    network to a wider variety of orientations within each step than a
+    batch-uniform rotation would.
     """
-    mask = torch.rand(x.shape[0], device=x.device) < 0.5
+    n = x.shape[0]
+    flip_mask = torch.rand(n, device=x.device) < 0.5
     flipped = torch.flip(x, dims=[3])
-    x = torch.where(mask[:, None, None, None], flipped, x)
-    k = int(torch.randint(0, 4, (1,)).item())
-    if k > 0:
-        x = torch.rot90(x, k=k, dims=[2, 3])
+    x = torch.where(flip_mask[:, None, None, None], flipped, x)
+
+    # Per-sample rotation: build the rotated variants once, then gather the
+    # selected variant per sample. Rotating each image individually in a
+    # Python loop would be far slower than four whole-batch rot90 calls.
+    ks = torch.randint(0, 4, (n,), device=x.device)
+    variants = torch.stack(
+        [torch.rot90(x, k=k, dims=[2, 3]) for k in range(4)], dim=0
+    )
+    idx = ks.view(1, n, 1, 1, 1).expand(1, n, *x.shape[1:])
+    x = variants.gather(0, idx).squeeze(0)
     return x
 
 

@@ -5,6 +5,34 @@ selects hyperparameters on an inner CV split of the outer training fold and
 evaluates on the held-out outer fold, so reported metrics are not biased by
 hyperparameter tuning. Standardisation is refit per fold to avoid leaking
 test-set statistics into training.
+
+Design choices
+--------------
+Outer ``k = 10``
+    Maximises the per-fold test set size (~1,774 samples on the 17,736-image
+    Galaxy10 dataset), giving stable per-fold metric estimates and tight
+    aggregate standard deviations. Ten-fold CV is the standard default in
+    applied ML when compute permits.
+
+Inner ``k = 3``
+    Balances the HP-selection signal against the compute cost paid inside
+    every outer fold. Three folds give a ~67 % train / 33 % validation split
+    per inner iteration — enough variance reduction to discriminate between
+    HP candidates without inflating the nested cost by another large factor.
+
+Stratified k-fold over bootstrap
+    Galaxy10 is class-imbalanced (the Cigar class has only n = 334 samples,
+    < 2 % of the dataset). Stratified k-fold preserves the per-class
+    proportions in every fold by construction; bootstrap resampling would
+    leave some folds with very few — or zero — minority-class samples,
+    destabilising both training and the per-fold metrics.
+
+Macro-F1 as the inner selection criterion
+    Because of the same class imbalance, accuracy is dominated by the
+    majority classes and is a poor signal for picking HPs that generalise
+    across all ten morphologies. Macro-F1 weights every class equally, so
+    HP choices that lift minority-class performance are not masked by gains
+    on the majority classes.
 """
 
 from __future__ import annotations

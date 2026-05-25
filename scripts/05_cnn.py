@@ -288,7 +288,20 @@ def main() -> None:
         X_outer_test = X[outer_test]
         y_outer_test = y[outer_test]
 
-        # Inner CV — single CNN per HP for speed.
+        # ------------------------------------------------------------------
+        # CAVEAT: Inner CV trains a SINGLE CNN member (n_members=1) per HP,
+        # not the full deep ensemble used for outer evaluation.
+        #   - Intentional: cuts inner CV cost by 5x (full ensemble would be
+        #     inner_k * |HP_GRID| * n_members = 3 * 3 * 5 = 45 trainings
+        #     per outer fold instead of 9).
+        #   - Trade-off: the HP selection signal is noisier than what a
+        #     full-ensemble inner CV would give, since a single member is
+        #     a higher-variance estimator of ensemble quality.
+        #   - Justified here because we only tune lr across a coarse grid
+        #     of 3 values; the gaps between candidates are large enough
+        #     that single-member noise is unlikely to flip the choice.
+        #   - Known limitation, to be discussed in the report.
+        # ------------------------------------------------------------------
         inner_folds = stratified_kfold_split(
             y_outer_train, k=3, seed=args.seed + i
         )

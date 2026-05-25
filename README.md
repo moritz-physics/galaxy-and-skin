@@ -45,3 +45,37 @@ This loads the dataset, logs ground-truth integrity checks, writes five
 diagnostic figures to `results/figures/`, and a JSON summary to
 `results/metrics/01_eda_summary.json`. Pass `--seed` (default 0) to control
 random sampling and `--out-dir` to change the figure destination.
+
+## Reproducing results
+
+Run the scripts from the project root in the order below. All scripts write
+figures to `results/figures/` and metric JSON / NPZ artefacts to
+`results/metrics/`. Runtimes are approximate, measured on an Apple M-series
+laptop.
+
+| # | Script | Purpose | Approx. runtime |
+|---|--------|---------|-----------------|
+| 1 | `scripts/01_eda.py` | Dataset integrity checks and EDA figures. | ~1 min |
+| 2 | `scripts/02_features.py` | Extract handcrafted features (HOG, colour, shape) from raw 256×256 images. | ~10 min |
+| 3 | `scripts/03_logreg.py` | Logistic regression baseline under nested CV. | ~5 min |
+| 4 | `scripts/04_rf.py` | Random forest baseline under nested CV. | ~30 min |
+| 5 | `scripts/05_cnn.py` | Deep-ensemble CNN under nested CV (the headline model). | ~3–4 h |
+| 6 | `scripts/05b_analysis.py` | Cross-model comparison and aggregate plots. | ~1 min |
+| 7 | `scripts/05c_temperature_scaling.py` | Post-hoc temperature scaling for calibration. | ~1 min |
+| 8 | `scripts/05d_uncertainty_decomposition.py` | Epistemic / aleatoric uncertainty decomposition. | ~1 min |
+| 9 | `scripts/05e_failure_analysis.py` | Confidently-wrong and high-entropy failure cases. | ~1 min |
+| 10 | `scripts/05f_boundary_cases.py` | Class-boundary / ambiguous sample analysis. | ~1 min |
+
+For the CNN, a smoke-test mode runs in a few minutes instead of hours and is
+useful for verifying the pipeline end-to-end before the full run:
+
+```bash
+uv run python scripts/05_cnn.py --fast   # img_size=32, epochs=5, M=2
+uv run python scripts/05_cnn.py          # full pipeline (default)
+```
+
+## Tests
+
+```bash
+uv run pytest tests/
+```

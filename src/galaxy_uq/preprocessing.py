@@ -33,6 +33,11 @@ def prepare_images_for_cnn(
         Tensor of shape ``(N, 3, target_size, target_size)`` in ``float32``
         with values in ``[0, 1]``.
     """
+    # NOTE: the default 64×64 resize is for CNN input only — it produces a
+    # new tensor and does not modify the on-disk dataset, which remains at
+    # the original 256×256 resolution in ``data/raw/Galaxy10_DECals.h5``.
+    # Classical-feature pipelines (HOG, colour histograms, etc.) read from
+    # the raw 256×256 images independently of this function.
     if images.ndim != 4 or images.shape[1:] != (256, 256, 3):
         raise ValueError(
             f"expected images of shape (N, 256, 256, 3), got {images.shape}"
