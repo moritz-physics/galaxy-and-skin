@@ -50,7 +50,7 @@ logger = logging.getLogger("05_cnn")
 
 SAVE_KWARGS: dict = {"dpi": 150, "bbox_inches": "tight"}
 
-LR_GRID: tuple[float, ...] = (0.0003, 0.001, 0.003)
+LR_GRID: tuple[float, ...] = (0.0001, 0.0003, 0.001, 0.003, 0.01)
 HP_GRID: list[dict] = [{"lr": lr, "weight_decay": 1e-4} for lr in LR_GRID]
 
 

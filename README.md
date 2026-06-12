@@ -7,6 +7,18 @@ each model's predicted probabilities remain calibrated when the inputs are
 corrupted. Cross-validation, hyperparameter tuning, and evaluation metrics are
 all implemented from scratch.
 
+## Repository layout
+
+Two separate projects, split at the top level:
+
+- **`galaxy/`** — the main project described above (`scripts/`, `src/galaxy_uq/`,
+  `tests/`, `report/`, `notebooks/`, plus its own `data/` and `results/`).
+- **`skin/`** — a self-contained sub-project: transfer learning on HAM10000 skin
+  lesions, with its own code, `data/`, and `results/`. See its section below.
+
+Galaxy scripts read and write paths relative to the working directory, so **run
+them from the `galaxy/` directory**.
+
 ## Setup
 
 This project uses [uv](https://docs.astral.sh/uv/) with Python 3.11. Install
@@ -19,25 +31,26 @@ uv sync
 ### Download the data
 
 The dataset is not tracked in git. Download the Galaxy10 DECaLS HDF5 file into
-`data/raw/` and verify its checksum:
+`galaxy/data/raw/` and verify its checksum:
 
 ```bash
-mkdir -p data/raw
-curl -L -o data/raw/Galaxy10_DECals.h5 \
+mkdir -p galaxy/data/raw
+curl -L -o galaxy/data/raw/Galaxy10_DECals.h5 \
   https://astro.utoronto.ca/~hleung/shared/Galaxy10/Galaxy10_DECals.h5
 
 # Expected SHA256:
 # 19aefc477c41bb7f77ff07599a6b82a038dc042f889a111b0d4d98bb755c1571
-shasum -a 256 data/raw/Galaxy10_DECals.h5
+shasum -a 256 galaxy/data/raw/Galaxy10_DECals.h5
 ```
 
 The file is ~2.54 GB.
 
 ## Reproducing task 1 (EDA)
 
-Run the exploratory data analysis from the project root:
+Run the exploratory data analysis from the `galaxy/` directory:
 
 ```bash
+cd galaxy
 uv run python scripts/01_eda.py
 ```
 
@@ -48,9 +61,9 @@ random sampling and `--out-dir` to change the figure destination.
 
 ## Reproducing results
 
-Run the scripts from the project root in the order below. All scripts write
-figures to `results/figures/` and metric JSON / NPZ artefacts to
-`results/metrics/`. Runtimes are approximate, measured on an Apple M-series
+Run the scripts from the `galaxy/` directory (`cd galaxy`) in the order below.
+All scripts write figures to `results/figures/` and metric JSON / NPZ artefacts
+to `results/metrics/`. Runtimes are approximate, measured on an Apple M-series
 laptop.
 
 | # | Script | Purpose | Approx. runtime |
@@ -76,6 +89,42 @@ uv run python scripts/05_cnn.py          # full pipeline (default)
 
 ## Tests
 
+From the repository root (pytest is configured to find `galaxy/tests`):
+
 ```bash
-uv run pytest tests/
+uv run pytest
 ```
+
+## Second use case: skin lesion classification (`skin/`)
+
+A self-contained sub-project for transfer learning on medical images, sharing
+this repo's environment. Everything skin-related — code, the data subset, and
+trained model artefacts — lives under `skin/`, keeping it fully separate from
+the galaxy work above. It fine-tunes an ImageNet-pretrained EfficientNet on a
+balanced subset of [HAM10000](https://www.kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000)
+(7 lesion classes), streamed from Hugging Face so the full ~6 GB is never
+stored locally.
+
+The current trained model is **EfficientNet-B3 @ 300px** (≈0.955 validation
+balanced accuracy), trained on a free Colab TPU via `skin/colab_training.ipynb`.
+That notebook is now configured to train **EfficientNetV2-S @ 384px** on the full
+dataset with early stopping — open it in Colab and run all cells. The local
+scripts below train a smaller EfficientNet-B0 on Apple GPU (MPS) as a fallback
+when no TPU is available.
+
+```bash
+cd skin
+uv run python 01_data.py      # stream + save balanced subset (~10 min, one-time)
+uv run python 02_finetune.py  # local two-phase fine-tune on Apple GPU (MPS)
+uv run python 03_app.py       # web app: open on iPhone over WiFi, upload a photo
+```
+
+For the better TPU-trained model, open `skin/colab_training.ipynb` in Google
+Colab (Runtime → TPU), run all cells, then download the contents of Drive's
+`galaxy-uq/results/skin/` into `skin/results/`. The app reads
+`skin/results/model_config.json` and loads whichever architecture was trained.
+
+Artefacts go to `skin/results/` and the data subset to `skin/data/` (both
+gitignored). **Not medical advice** — HAM10000 contains dermatoscope images, so
+phone-camera photos are out of distribution and predictions on them are
+unreliable by construction.

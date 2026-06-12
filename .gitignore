@@ -10,12 +10,16 @@ wheels/
 # Virtual environments
 .venv/
 
-# Data (large, not tracked)
-data/
+# Galaxy data (large, not tracked)
+galaxy/data/
 
-# Results — everything except tracked figures
-results/*
-!results/figures/
+# Galaxy results — everything except tracked figures
+galaxy/results/*
+!galaxy/results/figures/
+
+# Skin sub-project: data subset and trained model artefacts (large, not tracked)
+skin/data/
+skin/results/
 
 # Notebooks
 .ipynb_checkpoints/
