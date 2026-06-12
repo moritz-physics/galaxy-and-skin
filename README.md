@@ -97,34 +97,26 @@ uv run pytest
 
 ## Second use case: skin lesion classification (`skin/`)
 
-A self-contained sub-project for transfer learning on medical images, sharing
-this repo's environment. Everything skin-related — code, the data subset, and
-trained model artefacts — lives under `skin/`, keeping it fully separate from
-the galaxy work above. It fine-tunes an ImageNet-pretrained EfficientNet on a
-balanced subset of [HAM10000](https://www.kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000)
-(7 lesion classes), streamed from Hugging Face so the full ~6 GB is never
-stored locally.
+A self-contained sub-project that applies the same *calibrated-uncertainty*
+lens to medical imaging: an ImageNet-pretrained **EfficientNet** fine-tuned on
+[HAM10000](https://www.kaggle.com/datasets/kmader/skin-cancer-mnist-ham10000)
+(7 dermatoscopic lesion classes), plus an offline analysis of its calibration
+and robustness. The current EfficientNet-B3 reaches **0.874 validation balanced
+accuracy** with an **Expected Calibration Error of 0.048** — well-calibrated in
+distribution, and its uncertainty rises correctly under blur and darkening, but
+it becomes *confidently wrong* under Gaussian noise. A Gradio web app serves the
+model and an EfficientNetV2-S training notebook is configured for the next run.
 
-The current trained model is **EfficientNet-B3 @ 300px** (≈0.955 validation
-balanced accuracy), trained on a free Colab TPU via `skin/colab_training.ipynb`.
-That notebook is now configured to train **EfficientNetV2-S @ 384px** on the full
-dataset with early stopping — open it in Colab and run all cells. The local
-scripts below train a smaller EfficientNet-B0 on Apple GPU (MPS) as a fallback
-when no TPU is available.
+**See [`skin/README.md`](skin/README.md)** for the full write-up: dataset, model
+architecture, training recipe, results, calibration, and the
+perturbation-robustness experiment (with figures).
 
 ```bash
 cd skin
-uv run python 01_data.py      # stream + save balanced subset (~10 min, one-time)
-uv run python 02_finetune.py  # local two-phase fine-tune on Apple GPU (MPS)
-uv run python 03_app.py       # web app: open on iPhone over WiFi, upload a photo
+uv run python 03_app.py       # web app: open on your phone over WiFi, upload a photo
+uv run python 04_analysis.py  # offline calibration + robustness analysis (no Colab)
 ```
 
-For the better TPU-trained model, open `skin/colab_training.ipynb` in Google
-Colab (Runtime → TPU), run all cells, then download the contents of Drive's
-`galaxy-uq/results/skin/` into `skin/results/`. The app reads
-`skin/results/model_config.json` and loads whichever architecture was trained.
-
-Artefacts go to `skin/results/` and the data subset to `skin/data/` (both
-gitignored). **Not medical advice** — HAM10000 contains dermatoscope images, so
-phone-camera photos are out of distribution and predictions on them are
-unreliable by construction.
+**Not medical advice** — HAM10000 is dermatoscope imagery, so phone-camera
+photos are out of distribution and predictions on them are unreliable by
+construction.

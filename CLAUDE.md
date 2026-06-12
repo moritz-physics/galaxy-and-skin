@@ -12,12 +12,19 @@ Guidance for working in this repo. Two separate projects, split at the top level
 - **`skin/`** (self-contained sub-project): transfer learning on HAM10000 skin lesions.
   Everything skin lives under `skin/` — code, the `skin/data/` subset, and
   `skin/results/` model artefacts. Keep both projects' data/results under their own
-  top-level folder; nothing crosses over.
+  top-level folder; nothing crosses over. `skin/skin_model.py` is the shared helper
+  (generic head-swap, model rebuild from `model_config.json`, val preprocessing,
+  normalised entropy) imported by the app, the analysis script, and the tests — keep
+  it in sync with the training notebook's `replace_head`. `skin/04_analysis.py` runs
+  calibration + perturbation-robustness analysis on the trained model **fully offline**
+  (no Colab) and writes figures to `skin/results/figures/` (the one skin results path
+  that is git-tracked). Skin tests live in `skin/tests/`.
 
 Tests run from the repo root via `uv run pytest` (pyproject sets
-`pythonpath = ["galaxy/src"]` and `testpaths = ["galaxy/tests"]`).
+`pythonpath = ["galaxy/src", "skin"]` and `testpaths = ["galaxy/tests", "skin/tests"]`).
 
-`skin/data/` and `skin/results/` are gitignored (large). The app reads
+`skin/data/` and most of `skin/results/` are gitignored (large; the exception is
+`skin/results/figures/`). The app reads
 `skin/results/model_config.json` to rebuild whatever architecture was trained, so it
 adapts to any backbone without code changes.
 

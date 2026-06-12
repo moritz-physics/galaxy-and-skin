@@ -22,8 +22,8 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["galaxy/src"]
-testpaths = ["galaxy/tests"]
+pythonpath = ["galaxy/src", "skin"]
+testpaths = ["galaxy/tests", "skin/tests"]
 
 [dependency-groups]
 dev = [

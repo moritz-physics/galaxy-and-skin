@@ -17,9 +17,11 @@ galaxy/data/
 galaxy/results/*
 !galaxy/results/figures/
 
-# Skin sub-project: data subset and trained model artefacts (large, not tracked)
+# Skin sub-project: data subset and trained model artefacts (large, not tracked),
+# but keep the analysis figures (small, regenerable, useful in the repo)
 skin/data/
-skin/results/
+skin/results/*
+!skin/results/figures/
 
 # Notebooks
 .ipynb_checkpoints/

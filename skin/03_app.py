@@ -10,29 +10,19 @@ out of distribution, so treat predictions as a toy. See a dermatologist
 for anything real.
 """
 
-import json
-import math
+import sys
 from pathlib import Path
 
 import gradio as gr
 import pillow_heif
 import torch
-import torch.nn as nn
-from torchvision import models, transforms
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # find skin_model.py from any CWD
+from skin_model import load_trained_model, normalized_entropy, val_transform
 
 pillow_heif.register_heif_opener()
 
 RESULTS = Path(__file__).resolve().parent / "results"
-CLASSES = json.loads((RESULTS / "classes.json").read_text())
-
-# model_config.json is written by the Colab training notebook; older runs
-# (plain EfficientNet-B0) predate it, hence the fallback
-CFG_PATH = RESULTS / "model_config.json"
-if CFG_PATH.exists():
-    CFG = json.loads(CFG_PATH.read_text())
-else:
-    CFG = {"model": "efficientnet_b0", "img_size": 224, "checkpoint": "effnet_b0_best.pt"}
-CKPT = RESULTS / CFG["checkpoint"]
 
 # Per-class display name, plain-language description, and clinical risk tier.
 # Tiers drive the colour coding: a melanoma reading should never look the same
@@ -53,21 +43,13 @@ TIER_STYLE = {
     BENIGN: ("#16a34a", "Benign"),
 }
 
+# Rebuild whatever architecture the notebook trained (EfficientNet, ConvNeXt,
+# Swin, ViT, …) from results/model_config.json and load its weights.
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-model = models.get_model(CFG["model"], weights=None)
-model.classifier[1] = nn.Linear(model.classifier[1].in_features, len(CLASSES))
-model.load_state_dict(torch.load(CKPT, map_location=device, weights_only=True))
-model.to(device).eval()
+model, CLASSES, CFG = load_trained_model(RESULTS, device)
 
 IMG_SIZE = CFG["img_size"]
-preprocess = transforms.Compose(
-    [
-        transforms.Resize(round(IMG_SIZE * 256 / 224)),  # same ratio as training val transform
-        transforms.CenterCrop(IMG_SIZE),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-    ]
-)
+preprocess = val_transform(IMG_SIZE)
 
 
 def _bar(label: str, prob: float, colour: str, strong: bool) -> str:
@@ -108,8 +90,7 @@ def predict(image):
     colour, tier_label = TIER_STYLE[tier]
 
     # Normalised entropy in [0, 1]: a flat distribution → ~1 (model unsure).
-    entropy = -sum(p * math.log(p + 1e-12) for p in probs.tolist())
-    uncertainty = entropy / math.log(len(CLASSES))
+    uncertainty = normalized_entropy(probs)
 
     if top_p < 0.45 or uncertainty > 0.7:
         warn = (
