@@ -81,22 +81,27 @@ compensates for the imbalance.
 
 The classifier is an **ImageNet-pretrained EfficientNet** with its 1000-class
 head replaced by a fresh 7-class linear layer. The promoted model is
-**EfficientNetV2-S @ 384px**; an earlier **EfficientNet-B3 @ 300px** is kept
-archived under `results/archive_efficientnet_b3/`.
+**EfficientNetV2-S @ 384px**, trained with the imbalance correctors described
+[below](#combating-class-imbalance). Two earlier checkpoints are kept for
+comparison: the plain-CE V2-S baseline (`results/archive_efficientnet_v2_s_baseline/`)
+and an EfficientNet-B3 (`results/archive_efficientnet_b3/`).
 
-| | Promoted (current) | Previous (archived) |
-|---|---|---|
-| Backbone | **EfficientNetV2-S** | EfficientNet-B3 |
-| Input resolution | 384×384 | 300×300 |
-| Parameters | ~21 M | ~12 M |
-| Val balanced acc | **0.745** | 0.874 |
+| | Promoted (V2-S + LA/cRT) | V2-S baseline (plain CE) | B3 |
+|---|---|---|---|
+| Backbone | **EfficientNetV2-S** | EfficientNetV2-S | EfficientNet-B3 |
+| Input resolution | 384×384 | 384×384 | 300×300 |
+| Imbalance handling | logit adjustment + cRT | class-weighted CE | class-weighted CE |
+| Kaggle grouped-split val bal-acc | **0.829** | 0.791 | — |
+| Melanoma recall (local val) | **0.39** | 0.29 | 0.45 |
 
-The B3 figures came from a small capped local validation set; the V2-S model was
-trained on Kaggle against a larger, leakage-free `lesion_id`-grouped split (val
-balanced accuracy 0.791 there). The 0.745 above is the same offline analysis
-re-run on that local capped val set, so the two columns are directly comparable —
-V2-S trades a little headline accuracy on this particular slice for a much
-better-behaved uncertainty signal (see [robustness](#robustness-under-perturbation)).
+The headline number is the **leakage-free, `lesion_id`-grouped** Kaggle validation
+split: the imbalance correctors lifted it from **0.791 → 0.829** and, more
+importantly for a cancer screen, raised melanoma recall from 0.29 to 0.39. (The B3
+trained on a small *balanced, capped* subset, so its grouped-split number isn't
+comparable — its 0.874 in earlier docs was on the local capped val set.) The
+offline `04_analysis.py` numbers below are computed on that local capped set, which
+is less trustworthy here because it overlaps the Kaggle training images; treat the
+grouped-split figures as the real generalisation estimate.
 
 ### Why EfficientNet
 
@@ -176,10 +181,11 @@ TPU is available.
 
 HAM10000 is heavily long-tailed — melanocytic nevi are ~67% of it, dermatofibroma
 ~1% — so on the **full** training set a plain cross-entropy model collapses toward
-the majority class (the promoted V2-S model's melanoma recall is only 0.29 for
-exactly this reason). The capping trick (`TRAIN_CAP`) fixes this by *discarding*
-majority images, which throws away data. The notebooks instead wire in two modern,
-better-targeted correctors, each independently toggleable in the config cell:
+the majority class (the plain-CE V2-S baseline's melanoma recall was only 0.29 for
+exactly this reason; the promoted model raises it to 0.39). The capping trick
+(`TRAIN_CAP`) fixes this by *discarding* majority images, which throws away data.
+The notebooks instead wire in two modern, better-targeted correctors, each
+independently toggleable in the config cell:
 
 **1. Logit adjustment** (Menon et al., [*Long-tail learning via logit
 adjustment*](https://arxiv.org/abs/2007.07314), ICLR 2021), `LOGIT_ADJUST_TAU`.
@@ -208,10 +214,22 @@ Other standard options not wired in — effective-number reweighting, focal/LDAM
 losses, MixUp/CutMix, per-class threshold tuning, and (the real fix for the rarest
 classes) more external data — are noted as future work.
 
-> **Note:** the *currently promoted* V2-S checkpoint predates these correctors — it
-> was trained with plain class-weighted CE — so the results below are the
-> pre-improvement baseline. Logit adjustment and cRT are wired in for the next
-> training run; re-run a notebook with the defaults to pick up both.
+**Measured effect.** The promoted model was trained with both correctors on
+(`LOGIT_ADJUST_TAU=1`, `CRT_EPOCHS=5`). Against the plain class-weighted-CE
+baseline (same backbone, same split, archived under
+`results/archive_efficientnet_v2_s_baseline/`), on the leakage-free `lesion_id`-grouped
+Kaggle validation split:
+
+| | Baseline (plain CE) | + logit adjustment + cRT |
+|---|---|---|
+| Grouped-split val balanced acc | 0.791 | **0.829** |
+| Melanoma recall (local val) | 0.29 | **0.39** |
+| Expected Calibration Error (local val) | 0.088 | **0.071** |
+
+Logit adjustment did most of the work (the best epoch was in phase 2); the cRT
+phase here matched but didn't beat it, so the phase-2 checkpoint was kept. The gain
+that matters most is **melanoma recall climbing from 0.29 to 0.39** — fewer missed
+cancers, exactly what correcting the nevi bias should buy.
 
 ### Training on Kaggle
 
@@ -250,23 +268,28 @@ lower `BATCH_SIZE` to 16 if you hit CUDA OOM at 384px.
 
 ## Results
 
-The promoted **EfficientNetV2-S** reaches **0.706 accuracy / 0.745 balanced
-accuracy** on the 547-image local validation set.
+The promoted **EfficientNetV2-S** reaches **0.829 balanced accuracy** on the
+leakage-free grouped Kaggle split (see [above](#combating-class-imbalance)). The
+figures below are the offline `04_analysis.py` run on the 547-image local capped
+val set, where it scores **0.700 accuracy / 0.731 balanced accuracy** — slightly
+below the plain-CE baseline's 0.745 *on this particular set*, which overlaps the
+Kaggle training images and so is the less reliable benchmark of the two.
 
 ![Per-class precision, recall and F1](results/figures/per_class_f1.png)
 
 ![Confusion matrix](results/figures/confusion_matrix.png)
 
-Per-class F1 ranges from 0.89 on vascular lesions down to 0.42 on melanoma. The
-most clinically important caveat is in that last number:
+Per-class F1 ranges from 0.84 on vascular lesions down to 0.53 on melanoma. The
+most clinically important number is melanoma recall:
 
-> **Melanoma recall is only 0.29** — the model *misses* most melanomas, usually
-> confusing them for benign nevi or keratoses. Its melanoma **precision** is high
-> (0.76), so when it *does* call melanoma it is usually right, but it is far too
-> conservative about raising the alarm. A real screening tool would need to trade
-> precision for recall here (e.g. a lower decision threshold or a recall-weighted
-> loss). This is exactly why the app foregrounds the full probability distribution
-> and an uncertainty warning rather than a single label.
+> **Melanoma recall is 0.39** (up from 0.29 before the imbalance correctors) — the
+> model still *misses* most melanomas, usually confusing them for benign nevi or
+> keratoses, but markedly less often than the plain-CE baseline. Its melanoma
+> **precision** stays high (0.85), so when it *does* call melanoma it is usually
+> right; it is still too conservative about raising the alarm. Pushing recall
+> further would mean per-class threshold tuning or a recall-weighted loss. This is
+> exactly why the app foregrounds the full probability distribution and an
+> uncertainty warning rather than a single label.
 
 ## Calibration & uncertainty
 
@@ -274,11 +297,12 @@ Are the predicted probabilities trustworthy? The reliability diagram bins
 predictions by confidence and plots confidence against actual accuracy; a
 perfectly calibrated model sits on the diagonal.
 
-![Reliability diagram, ECE 0.088](results/figures/reliability.png)
+![Reliability diagram, ECE 0.071](results/figures/reliability.png)
 
-**Expected Calibration Error is 0.088** — reasonably calibrated, with the curve
-sitting below the diagonal, meaning the model is mildly **overconfident**. Post-hoc
-**temperature scaling** (as in the galaxy project's task 7) would tighten this.
+**Expected Calibration Error is 0.071** (down from 0.088 for the plain-CE baseline)
+— reasonably calibrated, with the curve sitting below the diagonal, meaning the
+model is mildly **overconfident**. Post-hoc **temperature scaling** (as in the
+galaxy project's task 7) would tighten this further.
 
 A second view: predictive entropy (normalised to [0, 1]) split by whether the
 prediction was correct. A useful uncertainty signal should be low when the model
@@ -286,7 +310,7 @@ is right and high when it is wrong.
 
 ![Entropy of correct vs incorrect predictions](results/figures/uncertainty_split.png)
 
-It is: mean entropy is **0.27 on correct** predictions vs **0.51 on incorrect**
+It is: mean entropy is **0.30 on correct** predictions vs **0.55 on incorrect**
 ones. The app uses this same entropy to show a "low confidence" warning.
 
 ## Robustness under perturbation
@@ -299,21 +323,27 @@ flags the degraded inputs.
 
 ![Accuracy and uncertainty under perturbation](results/figures/robustness.png)
 
-All three corruptions now behave correctly: as severity rises, balanced accuracy
-falls toward chance (~0.14 for 7 classes) and mean uncertainty climbs in step, so
-the entropy signal flags every degraded input.
+As severity rises, balanced accuracy falls toward chance (~0.14 for 7 classes) for
+all three corruptions, but the uncertainty signal only tracks it for two of them:
 
-- **Gaussian noise**: accuracy 0.74 → 0.15, entropy 0.34 → 0.87.
-- **Blur**: accuracy 0.74 → 0.20, entropy 0.34 → 0.80.
-- **Darken**: accuracy 0.74 → 0.19, entropy 0.34 → 0.60.
+- **Gaussian noise**: accuracy 0.73 → 0.14, entropy 0.37 → 0.73 ✅ (uncertainty rises).
+- **Blur**: accuracy 0.73 → 0.14, entropy 0.37 → 0.88 ✅ (uncertainty rises).
+- **Darken**: accuracy 0.73 → 0.16, entropy 0.37 → **0.03** ❌ (uncertainty *collapses*).
 
-This is a meaningful improvement over the earlier EfficientNet-B3, whose
-uncertainty *dropped* under Gaussian noise — it became *confidently wrong*, the
-dangerous failure mode for a confidence-gated system. EfficientNetV2-S no longer
-exhibits that: accuracy and uncertainty move together across all three axes.
+So this model catches noise and blur — the entropy warning would flag those — but
+**under heavy darkening it becomes confidently wrong**: accuracy falls to near
+chance while it gets *more* certain, the dangerous failure mode for any
+confidence-gated system. Curiously this is the opposite of the corruptions the
+earlier checkpoints failed on (B3 broke under Gaussian noise; the plain-CE V2-S
+baseline handled all three). The likely cause is that the logit-adjusted loss bakes
+in the training-set prior, and on very dark, far-out-of-distribution inputs the
+network saturates toward one class rather than spreading probability. The natural
+fix is to add brightness/contrast corruption to the training augmentation (it is
+currently only mild jitter) so the model learns to distrust badly-lit images.
 
 This is the same "calibrated uncertainty under perturbations" question the galaxy
-project studies, reproduced on a medical-imaging model.
+project studies, reproduced on a medical-imaging model — including a clean example
+of a corruption that defeats the confidence signal.
 
 ## The web app
 

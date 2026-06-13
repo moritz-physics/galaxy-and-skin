@@ -47,17 +47,24 @@ plots) — local Mac (MPS) training is too slow/crash-prone for this:
 
 Keep the two notebooks' shared logic (head-swap, freeze, two-phase loop, early stopping) in
 sync, and keep both in sync with `skin/skin_model.replace_head`. The promoted model is
-**EfficientNetV2-S @ 384px** (trained on Kaggle, val balanced accuracy 0.791 on its
-lesion-grouped split; 0.745 on the local capped val set via `04_analysis.py`), which both
-notebooks default to. The previous **EfficientNet-B3 @ 300px** is archived under
-`skin/results/archive_efficientnet_b3/`. Architecture-agnostic: change `MODEL_NAME` /
-`IMG_SIZE` in the config cell to try ConvNeXt, Swin, ViT, etc. Set `FT_EPOCHS` high —
-`EARLY_STOP_PATIENCE` cuts it off when val stops improving.
+**EfficientNetV2-S @ 384px** trained on Kaggle **with the imbalance correctors on** (val
+balanced accuracy **0.829** on its lesion-grouped split; 0.731 on the local capped val set
+via `04_analysis.py`), which both notebooks default to. Two earlier checkpoints are archived
+for comparison: the plain-CE V2-S baseline (`skin/results/archive_efficientnet_v2_s_baseline/`,
+grouped-split 0.791) and EfficientNet-B3 (`skin/results/archive_efficientnet_b3/`).
+Architecture-agnostic: change `MODEL_NAME` / `IMG_SIZE` in the config cell to try ConvNeXt,
+Swin, ViT, etc. Set `FT_EPOCHS` high — `EARLY_STOP_PATIENCE` cuts it off when val stops
+improving.
 
 **Class-imbalance handling (both notebooks, config-gated).** HAM10000 is ~67% melanocytic
-nevi, which biases a plain-CE model toward the majority class (the promoted V2-S checkpoint
-*predates* these correctors and has melanoma recall ~0.29 as a result). Two methods are
-wired into the three-phase training loop and must be kept in sync across both notebooks:
+nevi, which biases a plain-CE model toward the majority class (the plain-CE V2-S baseline had
+melanoma recall ~0.29). The promoted model corrects this — grouped-split balanced accuracy
+0.791→0.829, melanoma recall 0.29→0.39, ECE 0.088→0.071. One caveat surfaced in
+`04_analysis.py`: the corrected model goes *confidently wrong* under heavy darkening (entropy
+collapses while accuracy falls to chance), unlike the baseline — likely the logit-adjusted
+prior saturating on far-OOD dark inputs; the fix is brightness/contrast train augmentation.
+Two methods are wired into the three-phase training loop and must be kept in sync across both
+notebooks:
 - **Logit adjustment** (`LOGIT_ADJUST_TAU`, default 1.0; Menon et al. 2021) — phases 1–2
   train on `logits + τ·log P(y)` via the `LogitAdjustedLoss` module. It *replaces*
   inverse-frequency class weighting (`τ>0` switches the weighted CE off; the two would
@@ -69,8 +76,8 @@ wired into the three-phase training loop and must be kept in sync across both no
   it only overwrites the checkpoint if val balanced accuracy improves.
 
 Set either knob to 0 to ablate. Both are documented in the README's *Combating class
-imbalance* section. The promoted model has **not** yet been retrained with them — doing so
-is the next experiment.
+imbalance* section. In the promoted run, logit adjustment did the work (best epoch was in
+phase 2); cRT matched but didn't beat it, so the phase-2 checkpoint was kept.
 
 ### Colab compute efficiency — what is already built in
 
