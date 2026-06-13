@@ -79,14 +79,23 @@ compensates for the imbalance.
 ## Model architecture
 
 The classifier is an **ImageNet-pretrained EfficientNet** with its 1000-class
-head replaced by a fresh 7-class linear layer. Two backbones are in play:
+head replaced by a fresh 7-class linear layer. The promoted model is
+**EfficientNetV2-S @ 384px**; an earlier **EfficientNet-B3 @ 300px** is kept
+archived under `results/archive_efficientnet_b3/`.
 
-| | Currently trained | Notebook default (to train next) |
+| | Promoted (current) | Previous (archived) |
 |---|---|---|
-| Backbone | **EfficientNet-B3** | **EfficientNetV2-S** |
-| Input resolution | 300×300 | 384×384 |
-| Parameters | ~12 M | ~21 M |
-| Val balanced acc | **0.874** | _(not yet run)_ |
+| Backbone | **EfficientNetV2-S** | EfficientNet-B3 |
+| Input resolution | 384×384 | 300×300 |
+| Parameters | ~21 M | ~12 M |
+| Val balanced acc | **0.745** | 0.874 |
+
+The B3 figures came from a small capped local validation set; the V2-S model was
+trained on Kaggle against a larger, leakage-free `lesion_id`-grouped split (val
+balanced accuracy 0.791 there). The 0.745 above is the same offline analysis
+re-run on that local capped val set, so the two columns are directly comparable —
+V2-S trades a little headline accuracy on this particular slice for a much
+better-behaved uncertainty signal (see [robustness](#robustness-under-perturbation)).
 
 ### Why EfficientNet
 
@@ -98,11 +107,10 @@ separable convolutions and squeeze-and-excitation attention), which are cheap
 relative to their representational power — ideal for fine-tuning on a small
 medical dataset where a heavier model would simply overfit.
 
-**EfficientNetV2-S** (the configured next model) improves on this with
-**Fused-MBConv** blocks in the early stages (a regular 3×3 conv replaces the
-expand + depthwise pair, which is faster on modern accelerators) and a training
-recipe designed for higher resolutions — hence the move to 384px, EfficientNetV2-S's
-native size.
+**EfficientNetV2-S** improves on this with **Fused-MBConv** blocks in the early
+stages (a regular 3×3 conv replaces the expand + depthwise pair, which is faster
+on modern accelerators) and a training recipe designed for higher resolutions —
+hence the 384px input, EfficientNetV2-S's native size.
 
 ### Generic, swappable head
 
@@ -128,8 +136,14 @@ mild colour jitter.
 
 ## Training recipe
 
-Standard **two-phase transfer learning**, run on a free **Colab TPU** via
-PyTorch/XLA (`skin/colab_training.ipynb`):
+Standard **two-phase transfer learning**. Two interchangeable notebooks run the
+same recipe and produce the same artefacts — pick whichever compute you have:
+
+- **`skin/kaggle_training.ipynb`** — Kaggle **GPU** (P100/T4), reads the local
+  *Skin Cancer MNIST: HAM10000* dataset and uses mixed precision (AMP). See
+  [Training on Kaggle](#training-on-kaggle) below.
+- **`skin/colab_training.ipynb`** — free Colab **TPU** via PyTorch/XLA, streams
+  the dataset from Hugging Face.
 
 1. **Head warm-up** — freeze the pretrained backbone, train only the new
    7-class head for a few epochs. This stops the randomly-initialised head from
@@ -153,25 +167,60 @@ so a disconnect or early stop always leaves the best weights on disk. A local
 Apple-GPU (MPS) fallback (`02_finetune.py`, EfficientNet-B0) exists for when no
 TPU is available.
 
+### Training on Kaggle
+
+`skin/kaggle_training.ipynb` is the GPU twin of the Colab notebook. The only
+real differences are the data source (the local Kaggle HAM10000 dataset rather
+than streaming from Hugging Face) and the accelerator (CUDA + AMP rather than
+TPU); the model, two-phase recipe, early stopping, and saved artefacts are
+identical. HAM10000 ships no train/val split, so the notebook builds its own —
+**seeded and grouped by `lesion_id`** so the same lesion never appears in both
+splits (it averages ~2 images per lesion; an ungrouped split would leak and
+inflate the score). The abbreviated `dx` codes in the metadata are mapped to the
+project's full class names, reproducing the exact class order in `classes.json`,
+so a Kaggle-trained model is drop-in compatible with the app and analysis.
+
+To run it:
+
+1. **New Notebook** on Kaggle (Code → New Notebook), then **File → Import
+   Notebook** and upload `skin/kaggle_training.ipynb`.
+2. **Add Input** (right sidebar) → search *"Skin Cancer MNIST: HAM10000"* (by
+   *kmader*) and add it. It mounts at `/kaggle/input/skin-cancer-mnist-ham10000/`.
+3. **Settings → Accelerator → GPU T4 x2.** Use the **T4**, not the P100 —
+   Kaggle's PyTorch build no longer supports the P100's older sm_60 compute
+   capability, so it errors out (the notebook checks for this and fails fast with
+   a clear message). The T4 is sm_75 and works; the notebook uses one GPU, so the
+   second T4 idles.
+4. **Run All.** Outputs are written to `/kaggle/working/results/`
+   (`<model>_best.pt`, `model_config.json`, `classes.json`, `training_log.json`,
+   `confusion_matrix.png`, `training_curves.png`, `progress.log`).
+5. Click **Save Version** to persist `/kaggle/working/`, then download the
+   contents of `results/` from the version's *Output* tab into this repo's
+   `skin/results/` directory. The app reads `model_config.json` and adapts to
+   whatever architecture you trained.
+
+Change `MODEL_NAME` / `IMG_SIZE` in the config cell to try a different backbone;
+lower `BATCH_SIZE` to 16 if you hit CUDA OOM at 384px.
+
 ## Results
 
-The current **EfficientNet-B3** reaches **0.845 accuracy / 0.874 balanced
-accuracy** on the 547-image validation set.
+The promoted **EfficientNetV2-S** reaches **0.706 accuracy / 0.745 balanced
+accuracy** on the 547-image local validation set.
 
 ![Per-class precision, recall and F1](results/figures/per_class_f1.png)
 
 ![Confusion matrix](results/figures/confusion_matrix.png)
 
-Per-class F1 ranges from a perfect 1.00 on vascular lesions down to 0.62 on
-melanoma. The most clinically important caveat is in that last number:
+Per-class F1 ranges from 0.89 on vascular lesions down to 0.42 on melanoma. The
+most clinically important caveat is in that last number:
 
-> **Melanoma recall is only 0.45** — the model *misses* over half of melanomas,
-> usually confusing them for benign nevi or keratoses. Its melanoma **precision**
-> is high (0.98), so when it *does* call melanoma it is almost always right, but
-> it is far too conservative about raising the alarm. A real screening tool would
-> need to trade precision for recall here (e.g. a lower decision threshold or a
-> recall-weighted loss). This is exactly why the app foregrounds the full
-> probability distribution and an uncertainty warning rather than a single label.
+> **Melanoma recall is only 0.29** — the model *misses* most melanomas, usually
+> confusing them for benign nevi or keratoses. Its melanoma **precision** is high
+> (0.76), so when it *does* call melanoma it is usually right, but it is far too
+> conservative about raising the alarm. A real screening tool would need to trade
+> precision for recall here (e.g. a lower decision threshold or a recall-weighted
+> loss). This is exactly why the app foregrounds the full probability distribution
+> and an uncertainty warning rather than a single label.
 
 ## Calibration & uncertainty
 
@@ -179,10 +228,10 @@ Are the predicted probabilities trustworthy? The reliability diagram bins
 predictions by confidence and plots confidence against actual accuracy; a
 perfectly calibrated model sits on the diagonal.
 
-![Reliability diagram, ECE 0.048](results/figures/reliability.png)
+![Reliability diagram, ECE 0.088](results/figures/reliability.png)
 
-**Expected Calibration Error is 0.048** — well-calibrated, though the curve sits
-just below the diagonal, meaning the model is mildly **overconfident**. Post-hoc
+**Expected Calibration Error is 0.088** — reasonably calibrated, with the curve
+sitting below the diagonal, meaning the model is mildly **overconfident**. Post-hoc
 **temperature scaling** (as in the galaxy project's task 7) would tighten this.
 
 A second view: predictive entropy (normalised to [0, 1]) split by whether the
@@ -191,7 +240,7 @@ is right and high when it is wrong.
 
 ![Entropy of correct vs incorrect predictions](results/figures/uncertainty_split.png)
 
-It is: mean entropy is **0.11 on correct** predictions vs **0.36 on incorrect**
+It is: mean entropy is **0.27 on correct** predictions vs **0.51 on incorrect**
 ones. The app uses this same entropy to show a "low confidence" warning.
 
 ## Robustness under perturbation
@@ -204,18 +253,21 @@ flags the degraded inputs.
 
 ![Accuracy and uncertainty under perturbation](results/figures/robustness.png)
 
-- **Blur and darkening behave correctly**: accuracy falls and uncertainty rises
-  in step, so the entropy signal would catch these degraded images.
-- **Gaussian noise breaks it**: accuracy collapses to chance (~0.14 for 7
-  classes) while uncertainty actually **drops** — the model becomes *confidently
-  wrong*. This is the dangerous failure mode for any confidence-gated system: the
-  one corruption the uncertainty signal does **not** catch. The natural fix is to
-  add Gaussian noise to the training augmentation so the model learns to distrust
-  it.
+All three corruptions now behave correctly: as severity rises, balanced accuracy
+falls toward chance (~0.14 for 7 classes) and mean uncertainty climbs in step, so
+the entropy signal flags every degraded input.
+
+- **Gaussian noise**: accuracy 0.74 → 0.15, entropy 0.34 → 0.87.
+- **Blur**: accuracy 0.74 → 0.20, entropy 0.34 → 0.80.
+- **Darken**: accuracy 0.74 → 0.19, entropy 0.34 → 0.60.
+
+This is a meaningful improvement over the earlier EfficientNet-B3, whose
+uncertainty *dropped* under Gaussian noise — it became *confidently wrong*, the
+dangerous failure mode for a confidence-gated system. EfficientNetV2-S no longer
+exhibits that: accuracy and uncertainty move together across all three axes.
 
 This is the same "calibrated uncertainty under perturbations" question the galaxy
-project studies, reproduced on a medical-imaging model — including a clean
-example of where it fails.
+project studies, reproduced on a medical-imaging model.
 
 ## The web app
 
@@ -240,11 +292,13 @@ uv run python 03_app.py       # web app: open on your phone over WiFi, upload a 
 uv run python 04_analysis.py  # offline calibration + robustness analysis (no Colab)
 ```
 
-For the better TPU-trained model, open `colab_training.ipynb` in Google Colab
-(**Runtime → TPU → Run all**), then download the contents of Drive's
-`galaxy-uq/results/skin/` into `skin/results/`. To experiment, change
-`MODEL_NAME` / `IMG_SIZE` / the learning rates in the config cell — the head swap
-and freeze logic are generic, so any torchvision classifier works.
+For the better, larger model, train on a cloud accelerator and download the
+results into `skin/results/`: `kaggle_training.ipynb` on a Kaggle **GPU** (see
+[Training on Kaggle](#training-on-kaggle)) or `colab_training.ipynb` on a Colab
+**TPU** (**Runtime → TPU → Run all**, then pull Drive's `galaxy-uq/results/skin/`).
+To experiment, change `MODEL_NAME` / `IMG_SIZE` / the learning rates in the config
+cell — the head swap and freeze logic are generic, so any torchvision classifier
+works.
 
 Tests (run from the repo root):
 
@@ -261,7 +315,8 @@ skin/
 ├── 03_app.py             # Gradio web app (reads results/model_config.json)
 ├── 04_analysis.py        # offline calibration + robustness analysis
 ├── skin_model.py         # shared helpers: head-swap, model rebuild, preprocessing, entropy
-├── colab_training.ipynb  # TPU training (EfficientNetV2-S default; architecture-agnostic)
+├── kaggle_training.ipynb # Kaggle GPU training (local HAM10000 dataset; lesion-grouped split)
+├── colab_training.ipynb  # Colab TPU training (streams from HF; architecture-agnostic)
 ├── tests/                # unit tests for the shared helpers
 ├── data/                 # train/ and val/ image folders (gitignored)
 └── results/              # checkpoints, configs, logs (gitignored)

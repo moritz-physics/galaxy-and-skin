@@ -28,16 +28,31 @@ Tests run from the repo root via `uv run pytest` (pyproject sets
 `skin/results/model_config.json` to rebuild whatever architecture was trained, so it
 adapts to any backbone without code changes.
 
-## Skin model training on Google Colab (`skin/colab_training.ipynb`)
+## Skin model training in the cloud (`skin/kaggle_training.ipynb`, `skin/colab_training.ipynb`)
 
-Training runs on a **free Colab TPU** via PyTorch/XLA, because local Mac (MPS) training
-is slow and crash-prone for this. The last trained/promoted model is **EfficientNet-B3
-@ 300px** (~0.955 val balanced accuracy); the notebook's current default is
-**EfficientNetV2-S @ 384px** on the full dataset with early stopping (not yet run). The
-notebook is architecture-agnostic: change `MODEL_NAME` / `IMG_SIZE` in the config cell to
-try ConvNeXt, Swin, ViT, etc. — the head-swap and freeze logic are generic. Two-phase
-fine-tuning (head, then full) with early stopping on val balanced accuracy; `FT_EPOCHS`
-can be set high because `EARLY_STOP_PATIENCE` cuts it off when it stops improving.
+Two interchangeable notebooks run the **same** two-phase recipe and emit the **same**
+artefacts (`<model>_best.pt`, `model_config.json`, `classes.json`, `training_log.json`,
+plots) — local Mac (MPS) training is too slow/crash-prone for this:
+
+- **`kaggle_training.ipynb`** — Kaggle **GPU** (CUDA + AMP). Reads the local *Skin Cancer
+  MNIST: HAM10000* dataset (`kmader`, mounts at `/kaggle/input/skin-cancer-mnist-ham10000/`)
+  rather than streaming from HF. HAM10000 has no split, so it builds a **seeded,
+  `lesion_id`-grouped** train/val split (no leakage) and maps the metadata's abbreviated
+  `dx` codes to the project's full class names — `sorted(DX_TO_CLASS.values())` reproduces
+  the exact `classes.json` order, so a Kaggle model stays drop-in compatible. Outputs go to
+  `/kaggle/working/results/`; download them into `skin/results/` after **Save Version**.
+- **`colab_training.ipynb`** — free Colab **TPU** via PyTorch/XLA; streams the dataset from
+  Hugging Face and persists to Drive. The Colab-specific efficiency notes below apply only
+  to this notebook.
+
+Keep the two notebooks' shared logic (head-swap, freeze, two-phase loop, early stopping) in
+sync, and keep both in sync with `skin/skin_model.replace_head`. The promoted model is
+**EfficientNetV2-S @ 384px** (trained on Kaggle, val balanced accuracy 0.791 on its
+lesion-grouped split; 0.745 on the local capped val set via `04_analysis.py`), which both
+notebooks default to. The previous **EfficientNet-B3 @ 300px** is archived under
+`skin/results/archive_efficientnet_b3/`. Architecture-agnostic: change `MODEL_NAME` /
+`IMG_SIZE` in the config cell to try ConvNeXt, Swin, ViT, etc. Set `FT_EPOCHS` high —
+`EARLY_STOP_PATIENCE` cuts it off when val stops improving.
 
 ### Colab compute efficiency — what is already built in
 
