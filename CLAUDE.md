@@ -54,6 +54,24 @@ notebooks default to. The previous **EfficientNet-B3 @ 300px** is archived under
 `IMG_SIZE` in the config cell to try ConvNeXt, Swin, ViT, etc. Set `FT_EPOCHS` high —
 `EARLY_STOP_PATIENCE` cuts it off when val stops improving.
 
+**Class-imbalance handling (both notebooks, config-gated).** HAM10000 is ~67% melanocytic
+nevi, which biases a plain-CE model toward the majority class (the promoted V2-S checkpoint
+*predates* these correctors and has melanoma recall ~0.29 as a result). Two methods are
+wired into the three-phase training loop and must be kept in sync across both notebooks:
+- **Logit adjustment** (`LOGIT_ADJUST_TAU`, default 1.0; Menon et al. 2021) — phases 1–2
+  train on `logits + τ·log P(y)` via the `LogitAdjustedLoss` module. It *replaces*
+  inverse-frequency class weighting (`τ>0` switches the weighted CE off; the two would
+  double-correct). The prior is baked in during training, so **inference uses raw logits and
+  the app / `04_analysis.py` need no change**.
+- **Decoupled classifier re-training / cRT** (`CRT_EPOCHS`, default 5; Kang et al. 2020) —
+  phase 3 reloads phase-2's best weights, freezes the backbone, and re-trains only the head
+  on a `WeightedRandomSampler`-balanced loader with plain CE. It carries `best` forward, so
+  it only overwrites the checkpoint if val balanced accuracy improves.
+
+Set either knob to 0 to ablate. Both are documented in the README's *Combating class
+imbalance* section. The promoted model has **not** yet been retrained with them — doing so
+is the next experiment.
+
 ### Colab compute efficiency — what is already built in
 
 These are implemented in the notebook; preserve them when editing:

@@ -20,6 +20,7 @@ how they behave when the image is degraded.
 - [Dataset](#dataset)
 - [Model architecture](#model-architecture)
 - [Training recipe](#training-recipe)
+- [Combating class imbalance](#combating-class-imbalance)
 - [Results](#results)
 - [Calibration & uncertainty](#calibration--uncertainty)
 - [Robustness under perturbation](#robustness-under-perturbation)
@@ -136,8 +137,9 @@ mild colour jitter.
 
 ## Training recipe
 
-Standard **two-phase transfer learning**. Two interchangeable notebooks run the
-same recipe and produce the same artefacts — pick whichever compute you have:
+**Two-phase transfer learning**, plus an optional third rebalancing phase. Two
+interchangeable notebooks run the same recipe and produce the same artefacts —
+pick whichever compute you have:
 
 - **`skin/kaggle_training.ipynb`** — Kaggle **GPU** (P100/T4), reads the local
   *Skin Cancer MNIST: HAM10000* dataset and uses mixed precision (AMP). See
@@ -152,13 +154,16 @@ same recipe and produce the same artefacts — pick whichever compute you have:
 2. **Full fine-tune** — unfreeze everything and train at a low learning rate,
    with **early stopping** on validation balanced accuracy (patience 6), so you
    can set the epoch budget high and only pay for the epochs that actually help.
+3. **Classifier re-training (cRT)** — *optional, `CRT_EPOCHS > 0`._ Freeze the
+   backbone again and re-train only the head on a class-balanced sampler. See
+   [Combating class imbalance](#combating-class-imbalance) below for why.
 
 | Hyperparameter | Value |
 |---|---|
-| Loss | class-weighted cross-entropy |
+| Loss | logit-adjusted cross-entropy (`LOGIT_ADJUST_TAU=1`), or class-weighted CE |
 | Optimiser | AdamW |
-| Head LR / fine-tune LR | 1e-3 / 1e-4 |
-| Head epochs / fine-tune epochs | 3 / up to 40 (early-stopped) |
+| Head LR / fine-tune LR / cRT LR | 1e-3 / 1e-4 / 1e-3 |
+| Head / fine-tune / cRT epochs | 3 / up to 40 (early-stopped) / 5 |
 | Batch size | 24 (V2-S @ 384 on one TPU core) |
 | Selection metric | validation balanced accuracy |
 
@@ -166,6 +171,47 @@ The best checkpoint (by val balanced accuracy) is saved every time it improves,
 so a disconnect or early stop always leaves the best weights on disk. A local
 Apple-GPU (MPS) fallback (`02_finetune.py`, EfficientNet-B0) exists for when no
 TPU is available.
+
+### Combating class imbalance
+
+HAM10000 is heavily long-tailed — melanocytic nevi are ~67% of it, dermatofibroma
+~1% — so on the **full** training set a plain cross-entropy model collapses toward
+the majority class (the promoted V2-S model's melanoma recall is only 0.29 for
+exactly this reason). The capping trick (`TRAIN_CAP`) fixes this by *discarding*
+majority images, which throws away data. The notebooks instead wire in two modern,
+better-targeted correctors, each independently toggleable in the config cell:
+
+**1. Logit adjustment** (Menon et al., [*Long-tail learning via logit
+adjustment*](https://arxiv.org/abs/2007.07314), ICLR 2021), `LOGIT_ADJUST_TAU`.
+The loss is computed on `logits + τ·log P(y)` instead of the raw logits, which is
+the Bayes-consistent correction for a known label distribution and is equivalent to
+enforcing a larger margin for rarer classes. Because the prior is baked in *during
+training*, the **raw logits at inference are already corrected** — the app and the
+analysis script need no change. It is an *alternative* to inverse-frequency class
+weighting (using both double-corrects), so `τ>0` switches the class weights off;
+`τ=1` is the standard setting, `τ=0` disables it.
+
+**2. Decoupled classifier re-training / cRT** (Kang et al., [*Decoupling
+representation and classifier for long-tailed recognition*](https://arxiv.org/abs/1910.09217),
+ICLR 2020), `CRT_EPOCHS`. The key empirical finding of that paper is that imbalance
+mostly harms the *classifier*, not the learned *features*. So the backbone is
+trained on the natural distribution (phases 1–2, seeing every nevi image), then
+**frozen**, and only the head is re-trained for a few epochs on a class-balanced
+sampler (phase 3) with plain cross-entropy. This rebalances the decision boundary
+without disturbing the representation. Phase 3 carries the best val score forward,
+so it only overwrites the checkpoint if it actually improves — enabling it can
+never regress the saved model.
+
+These two plus the existing **balanced-accuracy selection metric** (mean per-class
+recall, so the majority class can't dominate model choice) are the levers in play.
+Other standard options not wired in — effective-number reweighting, focal/LDAM
+losses, MixUp/CutMix, per-class threshold tuning, and (the real fix for the rarest
+classes) more external data — are noted as future work.
+
+> **Note:** the *currently promoted* V2-S checkpoint predates these correctors — it
+> was trained with plain class-weighted CE — so the results below are the
+> pre-improvement baseline. Logit adjustment and cRT are wired in for the next
+> training run; re-run a notebook with the defaults to pick up both.
 
 ### Training on Kaggle
 
