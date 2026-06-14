@@ -37,10 +37,11 @@ LESIONS = {
     "dermatofibroma": ("Dermatofibroma", "A harmless firm skin nodule.", BENIGN),
     "vascular_lesions": ("Vascular lesion", "A blood-vessel mark, mostly harmless.", BENIGN),
 }
+# (bar/badge colour, clinical tier label, plain-language safety word)
 TIER_STYLE = {
-    MALIGNANT: ("#dc2626", "Malignant"),
-    PRECANCER: ("#d97706", "Pre-cancerous"),
-    BENIGN: ("#16a34a", "Benign"),
+    MALIGNANT: ("#dc2626", "Malignant", "Dangerous"),
+    PRECANCER: ("#d97706", "Pre-cancerous", "Caution"),
+    BENIGN: ("#16a34a", "Benign", "Safe"),
 }
 
 # Rebuild whatever architecture the notebook trained (EfficientNet, ConvNeXt,
@@ -52,17 +53,20 @@ IMG_SIZE = CFG["img_size"]
 preprocess = val_transform(IMG_SIZE)
 
 
-def _bar(label: str, prob: float, colour: str, strong: bool) -> str:
+def _bar(label: str, prob: float, tier: str, strong: bool) -> str:
+    colour, _, safety = TIER_STYLE[tier]
     pct = f"{prob * 100:.1f}%"
     weight = "600" if strong else "500"
-    track = "#e5e7eb"
     return f"""
     <div class="bar-row">
       <div class="bar-head">
-        <span style="font-weight:{weight}">{label}</span>
+        <span class="bar-label">
+          <span style="font-weight:{weight}">{label}</span>
+          <span class="risk-chip" style="background:{colour}1a;color:{colour}">{safety}</span>
+        </span>
         <span class="bar-pct">{pct}</span>
       </div>
-      <div class="bar-track" style="background:{track}">
+      <div class="bar-track">
         <div class="bar-fill" style="width:{prob * 100:.1f}%;background:{colour}"></div>
       </div>
     </div>"""
@@ -76,6 +80,16 @@ def _placeholder() -> str:
     </div>"""
 
 
+def show_uploaded(image):
+    # Browsers can't render HEIC/HEIF (iPhone's default) in an <img>, so the
+    # native upload preview shows a broken icon. We decode server-side (pillow-heif
+    # is registered) and hand back a plain RGB image, which Gradio re-serves as PNG
+    # — a format every browser displays. Fixes the preview for any odd input format.
+    if image is None:
+        return None
+    return image.convert("RGB")
+
+
 def predict(image):
     if image is None:
         return _placeholder()
@@ -87,7 +101,18 @@ def predict(image):
     ranked = sorted(zip(CLASSES, probs.tolist()), key=lambda kv: -kv[1])
     top_key, top_p = ranked[0]
     name, blurb, tier = LESIONS.get(top_key, (top_key, "", BENIGN))
-    colour, tier_label = TIER_STYLE[tier]
+    colour, tier_label, _ = TIER_STYLE[tier]
+
+    # Combined concern: total probability mass on non-benign (malignant +
+    # pre-cancerous) classes — the single number a triage read cares about,
+    # even when no one cancer class dominates.
+    concern = sum(p for k, p in ranked if LESIONS.get(k, (k, "", BENIGN))[2] != BENIGN)
+    if concern < 0.15:
+        c_col, c_lab = "#16a34a", "Low"
+    elif concern < 0.40:
+        c_col, c_lab = "#d97706", "Moderate"
+    else:
+        c_col, c_lab = "#dc2626", "High"
 
     # Normalised entropy in [0, 1]: a flat distribution → ~1 (model unsure).
     uncertainty = normalized_entropy(probs)
@@ -101,7 +126,7 @@ def predict(image):
         warn = ""
 
     bars = "".join(
-        _bar(LESIONS.get(k, (k, "", BENIGN))[0], p, TIER_STYLE[LESIONS.get(k, (k, "", BENIGN))[2]][0], i == 0)
+        _bar(LESIONS.get(k, (k, "", BENIGN))[0], p, LESIONS.get(k, (k, "", BENIGN))[2], i == 0)
         for i, (k, p) in enumerate(ranked[:3])
     )
 
@@ -113,6 +138,10 @@ def predict(image):
       </div>
       <h2 class="verdict-name">{name}</h2>
       <p class="verdict-blurb">{blurb}</p>
+      <div class="concern" style="border-color:{c_col}33">
+        <span class="concern-label">Combined concern signal</span>
+        <span class="concern-val" style="color:{c_col}">{concern * 100:.0f}% &middot; {c_lab}</span>
+      </div>
       {warn}
       <div class="breakdown-label">Top predictions</div>
       {bars}
@@ -128,7 +157,7 @@ CSS = """
   border-radius:12px; padding:12px 16px; font-size:0.88rem; margin:14px 0 6px;}
 #disclaimer b {color:#78350f;}
 .verdict, .verdict-empty {border:1px solid #e5e7eb; border-radius:16px;
-  padding:22px; background:#fff; min-height:300px;
+  padding:22px; background:#fff; min-height:300px; color:#374151;
   box-shadow:0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.04);}
 .verdict-empty {display:flex; flex-direction:column; align-items:center;
   justify-content:center; text-align:center; color:#9ca3af; gap:10px;}
@@ -137,18 +166,31 @@ CSS = """
 .tier-badge {color:#fff; font-weight:600; font-size:0.8rem; padding:5px 12px;
   border-radius:999px; letter-spacing:0.01em;}
 .conf {color:#6b7280; font-size:0.85rem; font-weight:500;}
-.verdict-name {font-size:1.6rem; font-weight:700; margin:14px 0 2px; letter-spacing:-0.02em;}
+.verdict-name {font-size:1.6rem; font-weight:700; margin:14px 0 2px;
+  letter-spacing:-0.02em; color:#111827;}
+.bar-label > span:first-child {color:#1f2937;}
 .verdict-blurb {color:#6b7280; margin:0 0 14px; font-size:0.95rem;}
+.concern {display:flex; align-items:center; justify-content:space-between;
+  border:1px solid; border-radius:10px; padding:9px 13px; margin-bottom:14px;
+  background:#fafafa;}
+.concern-label {font-size:0.82rem; color:#6b7280; font-weight:500;}
+.concern-val {font-size:0.95rem; font-weight:700; font-variant-numeric:tabular-nums;}
 .warn {background:#fef2f2; border:1px solid #fecaca; color:#991b1b;
   border-radius:10px; padding:10px 12px; font-size:0.86rem; margin-bottom:14px;}
 .breakdown-label {text-transform:uppercase; letter-spacing:0.06em;
   font-size:0.72rem; color:#9ca3af; font-weight:600; margin:6px 0 10px;}
 .bar-row {margin-bottom:12px;}
 .bar-head {display:flex; justify-content:space-between; font-size:0.9rem; margin-bottom:5px;}
+.bar-label {display:flex; align-items:center; gap:8px;}
+.risk-chip {font-size:0.68rem; font-weight:700; padding:2px 8px; border-radius:999px;
+  text-transform:uppercase; letter-spacing:0.03em;}
 .bar-pct {color:#6b7280; font-variant-numeric:tabular-nums;}
-.bar-track {height:9px; border-radius:999px; overflow:hidden;}
+.bar-track {height:9px; border-radius:999px; overflow:hidden; background:#e5e7eb;}
 .bar-fill {height:100%; border-radius:999px; transition:width 0.4s ease;}
 #footer {text-align:center; color:#9ca3af; font-size:0.8rem; margin-top:18px; line-height:1.6;}
+/* Image preview: show the whole photo, centred, never squashed to a sliver. */
+#lesion-img {border-radius:16px; overflow:hidden;}
+#lesion-img img {width:100%; height:100%; object-fit:contain; background:#0b1220;}
 """
 
 THEME = gr.themes.Soft(
@@ -192,6 +234,7 @@ with gr.Blocks(title="Skin Lesion Classifier") as demo:
                 sources=["upload", "webcam"],
                 label="Lesion photo",
                 height=340,
+                elem_id="lesion-img",
             )
             with gr.Row():
                 clear_btn = gr.ClearButton(image_in, value="Clear")
@@ -210,11 +253,15 @@ with gr.Blocks(title="Skin Lesion Classifier") as demo:
         """
         <div id="footer">
           Model: """
-        f"{CFG['model']} @ {IMG_SIZE}px &middot; trained on a balanced HAM10000 subset.<br>"
-        "Predictions are probabilities, not diagnoses."
+        f"{CFG['model']} @ {IMG_SIZE}px &middot; HAM10000, imbalance-corrected training.<br>"
+        "Predictions are calibrated probabilities, not diagnoses."
         "</div>"
     )
 
+    # On upload, re-encode to a browser-displayable PNG (handles HEIC/iPhone),
+    # which then triggers .change → predict. No loop: .upload only fires on a real
+    # user upload, not on the programmatic value we set here.
+    image_in.upload(show_uploaded, inputs=image_in, outputs=image_in)
     run_btn.click(predict, inputs=image_in, outputs=verdict)
     image_in.change(predict, inputs=image_in, outputs=verdict)
     clear_btn.click(lambda: _placeholder(), outputs=verdict)
