@@ -1,0 +1,72 @@
+{
+  "config": {
+    "proxy_img_size": 256,
+    "subset_fraction": 0.4,
+    "head_epochs": 2,
+    "ft_epochs": 6,
+    "logit_adjust_tau": 1.0,
+    "seed": 42
+  },
+  "results": {
+    "efficientnet_v2_s": {
+      "bal_acc": 0.768921149494148,
+      "acc": 0.7324749642346209,
+      "ece": 0.1082208759027489,
+      "robust": {
+        "Darken": {
+          "bal_acc": 0.16283355838300895,
+          "mean_entropy": 0.42189597924687594
+        },
+        "Gaussian noise": {
+          "bal_acc": 0.1507482993197279,
+          "mean_entropy": 0.592003809017796
+        },
+        "Blur": {
+          "bal_acc": 0.1540816326530612,
+          "mean_entropy": 0.8168181518922376
+        }
+      },
+      "mins": 4.2
+    },
+    "convnext_small": {
+      "bal_acc": 0.7861826016300114,
+      "acc": 0.771101573676681,
+      "ece": 0.09146800803524226,
+      "robust": {
+        "Darken": {
+          "bal_acc": 0.5601376427514575,
+          "mean_entropy": 0.5394310373911784
+        },
+        "Gaussian noise": {
+          "bal_acc": 0.16373646500020125,
+          "mean_entropy": 0.5310518613313375
+        },
+        "Blur": {
+          "bal_acc": 0.4160171130108336,
+          "mean_entropy": 0.5643154398684117
+        }
+      },
+      "mins": 5.7
+    },
+    "swin_v2_s": {
+      "bal_acc": 0.787341079468238,
+      "acc": 0.7896995708154506,
+      "ece": 0.04041377025441891,
+      "robust": {
+        "Darken": {
+          "bal_acc": 0.5561963546657424,
+          "mean_entropy": 0.4288527498124802
+        },
+        "Gaussian noise": {
+          "bal_acc": 0.2078758177109825,
+          "mean_entropy": 0.8399149487841445
+        },
+        "Blur": {
+          "bal_acc": 0.5634597227297384,
+          "mean_entropy": 0.5608929006039616
+        }
+      },
+      "mins": 8.7
+    }
+  }
+}

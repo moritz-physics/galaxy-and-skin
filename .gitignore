@@ -22,6 +22,20 @@ galaxy/results/*
 skin/data/
 skin/results/*
 !skin/results/figures/
+# Architecture-selection & HPO decision records: track the small JSON/PNG/MD only
+# (not checkpoints *.pt, Optuna DBs *.db, or verbose Kaggle *.log).
+!skin/results/bakeoff/
+!skin/results/hpo/
+skin/results/bakeoff/**
+skin/results/hpo/**
+!skin/results/bakeoff/**/
+!skin/results/hpo/**/
+!skin/results/bakeoff/**/*.json
+!skin/results/bakeoff/**/*.png
+!skin/results/bakeoff/**/*.md
+!skin/results/hpo/**/*.json
+!skin/results/hpo/**/*.png
+!skin/results/hpo/**/*.md
 
 # Notebooks
 .ipynb_checkpoints/

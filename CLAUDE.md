@@ -28,6 +28,40 @@ Tests run from the repo root via `uv run pytest` (pyproject sets
 `skin/results/model_config.json` to rebuild whatever architecture was trained, so it
 adapts to any backbone without code changes.
 
+## Model selection: bake-off → confirmation → HPO
+
+Three Kaggle GPU notebooks, run in order, decide the backbone and its hyperparameters
+*before* the full training run. All three run at **proxy fidelity** (256px, a stratified
+subset that preserves the class prior so logit adjustment stays valid, short epochs): we
+only need the **ranking** of candidates/configs, not final accuracy. They reuse the
+training notebook's split / head-swap / imbalance recipe verbatim, and mirror
+`04_analysis.py`'s ECE + perturbations, so the numbers are comparable to the full analysis.
+Decision records and conventions live in **`skin/results/bakeoff/README.md`** (read it
+first). The git-tracked artefacts are small JSON/PNG/MD only (see `.gitignore`);
+checkpoints `*.pt`, Optuna DBs `*.db`, and Kaggle `*.log` are not.
+
+1. **`skin/kaggle_bakeoff.ipynb`** — ranks torchvision-native backbones
+   (`efficientnet_v2_s`, `convnext_small`, `swin_v2_s`; torchvision-native keeps the winner
+   drop-in loadable by the app — ConvNeXt-V2 / DINOv2 are timm-only and would need a
+   `skin_model` loader change) on balanced accuracy, ECE, and darken/noise/blur. Single seed.
+2. **`skin/kaggle_bakeoff_confirm.ipynb`** — re-runs the top finalists across **3 seeds** on
+   a fixed split, reporting mean ± std. This exists because **seed noise on the ~700-image
+   val set is large enough to flip rankings**: the single-seed bake-off favoured Swin-V2-S
+   largely on an ECE of 0.040 that turned out to be a lucky seed (never repeated). Across
+   seeds the finalists tie on accuracy/calibration and **ConvNeXt-Small wins robustness**
+   (darken + noise), so ConvNeXt @ 256px is the chosen backbone.
+3. **`skin/kaggle_hpo.ipynb`** — Optuna (TPE + Hyperband pruning) search over ConvNeXt-Small:
+   `head_lr, ft_lr, weight_decay, label_smoothing, tau` (imbalance) and `aug_strength` (the
+   darken-failure fix). Carries the seed-noise lesson: **searches at one seed for speed, then
+   re-validates the top-K configs across seeds** and promotes on mean bal-acc with ties
+   broken on ECE then darken. The study is a resumable SQLite file in
+   `/kaggle/working/results/` (`load_if_exists=True`) so it survives Kaggle's session cap.
+   Writes `best_params.json` + `hpo_results.json` + plots → download into
+   `skin/results/hpo/`.
+
+To promote: set `MODEL_NAME=convnext_small` + the winning HPs in `kaggle_training.ipynb`
+and run the full-fidelity recipe.
+
 ## Skin model training in the cloud (`skin/kaggle_training.ipynb`, `skin/colab_training.ipynb`)
 
 Two interchangeable notebooks run the **same** two-phase recipe and emit the **same**
