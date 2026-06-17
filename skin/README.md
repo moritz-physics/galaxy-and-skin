@@ -96,35 +96,37 @@ loss** and **balanced accuracy** (mean per-class recall) as the headline metric.
 | **Total** | **2,548** | **547** |
 
 Images are stored with their short side resized (LANCZOS) so that later
-resize/crop never has to upscale. The Colab notebook can instead pull the
-**full** training set (`FULL_DATASET = True`) — the class-weighted loss still
-compensates for the imbalance.
+resize/crop never has to upscale. The training notebook can instead use the
+**full** dataset — the class-weighted loss still compensates for the imbalance.
 
 ## Model architecture
 
 The classifier is an **ImageNet-pretrained EfficientNet** with its 1000-class
-head replaced by a fresh 7-class linear layer. The promoted model is
-**EfficientNetV2-S @ 384px**, trained with the imbalance correctors described
-[below](#combating-class-imbalance). Two earlier checkpoints are kept for
-comparison: the plain-CE V2-S baseline (`results/archive_efficientnet_v2_s_baseline/`)
-and an EfficientNet-B3 (`results/archive_efficientnet_b3/`).
+head replaced by a fresh 7-class linear layer. The **model of record is
+EfficientNet-B3 @ 300px** (promoted in `results/`), the best of several backbones
+we trialled in an architecture bake-off and tuned with a Weights & Biases
+hyperparameter sweep. Two earlier checkpoints are kept under `results/archive_*`
+for comparison: an EfficientNetV2-S @ 384px run with the imbalance correctors
+described [below](#combating-class-imbalance), and a plain-CE V2-S baseline.
 
-| | Promoted (V2-S + LA/cRT) | V2-S baseline (plain CE) | B3 |
+| | **B3 — model of record** | V2-S + LA/cRT (archived) | V2-S baseline (archived) |
 |---|---|---|---|
-| Backbone | **EfficientNetV2-S** | EfficientNetV2-S | EfficientNet-B3 |
-| Input resolution | 384×384 | 384×384 | 300×300 |
-| Imbalance handling | logit adjustment + cRT | class-weighted CE | class-weighted CE |
-| Kaggle grouped-split val bal-acc | **0.829** | 0.791 | — |
-| Melanoma recall (local val) | **0.39** | 0.29 | 0.45 |
+| Backbone | **EfficientNet-B3** | EfficientNetV2-S | EfficientNetV2-S |
+| Input resolution | 300×300 | 384×384 | 384×384 |
+| Imbalance handling | class-weighted CE | logit adjustment + cRT | class-weighted CE |
+| Best val bal-acc (training split) | **0.955** | 0.829 (grouped) | 0.791 (grouped) |
+| Local capped-val bal-acc | **0.874** | 0.731 | — |
+| Melanoma recall (local val, argmax) | **0.45** | 0.39 | 0.29 |
 
-The headline number is the **leakage-free, `lesion_id`-grouped** Kaggle validation
-split: the imbalance correctors lifted it from **0.791 → 0.829** and, more
-importantly for a cancer screen, raised melanoma recall from 0.29 to 0.39. (The B3
-trained on a small *balanced, capped* subset, so its grouped-split number isn't
-comparable — its 0.874 in earlier docs was on the local capped val set.) The
-offline `04_analysis.py` numbers below are computed on that local capped set, which
-is less trustworthy here because it overlaps the Kaggle training images; treat the
-grouped-split figures as the real generalisation estimate.
+> **Reading the numbers honestly.** The V2-S figures use the **leakage-free,
+> `lesion_id`-grouped** Kaggle split — the trustworthy generalisation protocol.
+> B3's **0.955** is its best epoch on its own training-time val split; its
+> **0.874 / 0.45** come from the offline `04_analysis.py` / `08_clinical.py` runs
+> on the local capped `data/val` set, which can overlap training images and so
+> reads a little optimistically. Treat grouped-split numbers as the real
+> generalisation estimate, and the local-val numbers as the basis for the
+> *relative* calibration and clinical story (see
+> [`CLINICAL_REPORT.md`](CLINICAL_REPORT.md)).
 
 ### Why EfficientNet
 
@@ -136,10 +138,10 @@ separable convolutions and squeeze-and-excitation attention), which are cheap
 relative to their representational power — ideal for fine-tuning on a small
 medical dataset where a heavier model would simply overfit.
 
-**EfficientNetV2-S** improves on this with **Fused-MBConv** blocks in the early
-stages (a regular 3×3 conv replaces the expand + depthwise pair, which is faster
-on modern accelerators) and a training recipe designed for higher resolutions —
-hence the 384px input, EfficientNetV2-S's native size.
+We also trialled the larger **EfficientNetV2-S** (Fused-MBConv blocks, 384px
+native), but **B3 won the bake-off** on this small medical dataset — bigger isn't
+always better when a heavier model just overfits. B3 is kept as the model of
+record; the V2-S runs are archived under `results/archive_*`.
 
 ### Generic, swappable head
 
@@ -172,8 +174,6 @@ pick whichever compute you have:
 - **`skin/kaggle_training.ipynb`** — Kaggle **GPU** (P100/T4), reads the local
   *Skin Cancer MNIST: HAM10000* dataset and uses mixed precision (AMP). See
   [Training on Kaggle](#training-on-kaggle) below.
-- **`skin/colab_training.ipynb`** — free Colab **TPU** via PyTorch/XLA, streams
-  the dataset from Hugging Face.
 
 1. **Head warm-up** — freeze the pretrained backbone, train only the new
    7-class head for a few epochs. This stops the randomly-initialised head from
@@ -190,9 +190,9 @@ pick whichever compute you have:
 |---|---|
 | Loss | logit-adjusted cross-entropy (`LOGIT_ADJUST_TAU=1`), or class-weighted CE |
 | Optimiser | AdamW |
-| Head LR / fine-tune LR / cRT LR | 1e-3 / 1e-4 / 1e-3 |
+| Head LR / fine-tune LR / cRT LR | 5e-4 / 1.5e-4 / 1e-3 (from the W&B sweep) |
 | Head / fine-tune / cRT epochs | 3 / up to 40 (early-stopped) / 5 |
-| Batch size | 24 (V2-S @ 384 on one TPU core) |
+| Batch size | 32 (B3 @ 300 on a Kaggle T4) |
 | Selection metric | validation balanced accuracy |
 
 The best checkpoint (by val balanced accuracy) is saved every time it improves,
@@ -205,7 +205,7 @@ TPU is available.
 HAM10000 is heavily long-tailed — melanocytic nevi are ~67% of it, dermatofibroma
 ~1% — so on the **full** training set a plain cross-entropy model collapses toward
 the majority class (the plain-CE V2-S baseline's melanoma recall was only 0.29 for
-exactly this reason; the promoted model raises it to 0.39). The capping trick
+exactly this reason; the logit-adjusted + cRT V2-S run raised it to 0.39). The capping trick
 (`TRAIN_CAP`) fixes this by *discarding* majority images, which throws away data.
 The notebooks instead wire in two modern, better-targeted correctors, each
 independently toggleable in the config cell:
@@ -237,7 +237,7 @@ Other standard options not wired in — effective-number reweighting, focal/LDAM
 losses, MixUp/CutMix, per-class threshold tuning, and (the real fix for the rarest
 classes) more external data — are noted as future work.
 
-**Measured effect.** The promoted model was trained with both correctors on
+**Measured effect.** These correctors were validated on the **archived V2-S run**
 (`LOGIT_ADJUST_TAU=1`, `CRT_EPOCHS=5`). Against the plain class-weighted-CE
 baseline (same backbone, same split, archived under
 `results/archive_efficientnet_v2_s_baseline/`), on the leakage-free `lesion_id`-grouped
@@ -256,11 +256,10 @@ cancers, exactly what correcting the nevi bias should buy.
 
 ### Training on Kaggle
 
-`skin/kaggle_training.ipynb` is the GPU twin of the Colab notebook. The only
-real differences are the data source (the local Kaggle HAM10000 dataset rather
-than streaming from Hugging Face) and the accelerator (CUDA + AMP rather than
-TPU); the model, two-phase recipe, early stopping, and saved artefacts are
-identical. HAM10000 ships no train/val split, so the notebook builds its own —
+`skin/kaggle_training.ipynb` is the main training notebook (Kaggle **GPU**, CUDA
++ AMP). It also logs live to Weights & Biases and its config carries the
+sweep-tuned hyperparameters. HAM10000 ships no train/val split, so the notebook
+builds its own —
 **seeded and grouped by `lesion_id`** so the same lesion never appears in both
 splits (it averages ~2 images per lesion; an ungrouped split would leak and
 inflate the score). The abbreviated `dx` codes in the metadata are mapped to the
@@ -287,32 +286,32 @@ To run it:
    whatever architecture you trained.
 
 Change `MODEL_NAME` / `IMG_SIZE` in the config cell to try a different backbone;
-lower `BATCH_SIZE` to 16 if you hit CUDA OOM at 384px.
+lower `BATCH_SIZE` to 16 if you hit CUDA OOM.
 
 ## Results
 
-The promoted **EfficientNetV2-S** reaches **0.829 balanced accuracy** on the
-leakage-free grouped Kaggle split (see [above](#combating-class-imbalance)). The
-figures below are the offline `04_analysis.py` run on the 547-image local capped
-val set, where it scores **0.700 accuracy / 0.731 balanced accuracy** — slightly
-below the plain-CE baseline's 0.745 *on this particular set*, which overlaps the
-Kaggle training images and so is the less reliable benchmark of the two.
+The model of record, **EfficientNet-B3 @ 300px**, reaches **0.955** balanced
+accuracy on its training-time val split. The figures below are the offline
+`04_analysis.py` run on the 547-image local capped val set, where it scores
+**0.845 accuracy / 0.874 balanced accuracy** (95% CI [0.852, 0.896]) with a
+well-calibrated ECE of 0.048. See [`CLINICAL_REPORT.md`](CLINICAL_REPORT.md) for
+the melanoma-sensitivity story the balanced accuracy hides.
 
-![Per-class precision, recall and F1](results/figures/per_class_f1.png)
+![Per-class precision, recall and F1](results/figures/performance/per_class_f1.png)
 
-![Confusion matrix](results/figures/confusion_matrix.png)
+![Confusion matrix](results/figures/performance/confusion_matrix.png)
 
-Per-class F1 ranges from 0.84 on vascular lesions down to 0.53 on melanoma. The
+Per-class F1 ranges from 1.00 on vascular lesions down to 0.62 on melanoma. The
 most clinically important number is melanoma recall:
 
-> **Melanoma recall is 0.39** (up from 0.29 before the imbalance correctors) — the
-> model still *misses* most melanomas, usually confusing them for benign nevi or
-> keratoses, but markedly less often than the plain-CE baseline. Its melanoma
-> **precision** stays high (0.85), so when it *does* call melanoma it is usually
-> right; it is still too conservative about raising the alarm. Pushing recall
-> further would mean per-class threshold tuning or a recall-weighted loss. This is
-> exactly why the app foregrounds the full probability distribution and an
-> uncertainty warning rather than a single label.
+> **Melanoma recall is only 0.45 at argmax** — the model *misses* over half of
+> melanomas, usually confusing them for benign nevi. Its melanoma **precision** is
+> very high (0.98), so when it *does* call melanoma it is almost always right; it is
+> just far too conservative about raising the alarm. Crucially, its melanoma AUC is
+> 0.977 — the *ranking* is excellent, so **threshold tuning** recovers 0.91
+> sensitivity at 0.93 specificity with no retraining. This is the central finding
+> of [`CLINICAL_REPORT.md`](CLINICAL_REPORT.md), and why the app foregrounds the
+> full probability distribution and an uncertainty warning rather than a single label.
 
 ## Calibration & uncertainty
 
@@ -320,20 +319,21 @@ Are the predicted probabilities trustworthy? The reliability diagram bins
 predictions by confidence and plots confidence against actual accuracy; a
 perfectly calibrated model sits on the diagonal.
 
-![Reliability diagram, ECE 0.071](results/figures/reliability.png)
+![Reliability diagram, ECE 0.048](results/figures/calibration/reliability.png)
 
-**Expected Calibration Error is 0.071** (down from 0.088 for the plain-CE baseline)
-— reasonably calibrated, with the curve sitting below the diagonal, meaning the
-model is mildly **overconfident**. Post-hoc **temperature scaling** (as in the
-galaxy project's task 7) would tighten this further.
+**Expected Calibration Error is 0.048** — well calibrated, with the curve sitting
+slightly below the diagonal (mildly **overconfident**). Post-hoc **temperature
+scaling** is implemented in `04_analysis.py`: fitting `T = 1.24` on a calibration
+split and evaluating on a held-out half trims ECE from 0.054 to 0.040 — see
+`results/figures/calibration/calibration_temperature.png`.
 
 A second view: predictive entropy (normalised to [0, 1]) split by whether the
 prediction was correct. A useful uncertainty signal should be low when the model
 is right and high when it is wrong.
 
-![Entropy of correct vs incorrect predictions](results/figures/uncertainty_split.png)
+![Entropy of correct vs incorrect predictions](results/figures/calibration/uncertainty_split.png)
 
-It is: mean entropy is **0.30 on correct** predictions vs **0.55 on incorrect**
+It is: mean entropy is **0.11 on correct** predictions vs **0.36 on incorrect**
 ones. The app uses this same entropy to show a "low confidence" warning.
 
 ## Robustness under perturbation
@@ -344,7 +344,7 @@ track both balanced accuracy and mean uncertainty. A *trustworthy* model should
 become **less accurate and more uncertain together**, so that low confidence
 flags the degraded inputs.
 
-![Accuracy and uncertainty under perturbation](results/figures/robustness.png)
+![Accuracy and uncertainty under perturbation](results/figures/robustness/robustness.png)
 
 As severity rises, balanced accuracy falls toward chance (~0.14 for 7 classes) for
 all three corruptions, but the uncertainty signal only tracks it for two of them:
@@ -388,16 +388,14 @@ cd skin
 uv run python 01_data.py      # stream + save the balanced subset (~10 min, one-time)
 uv run python 02_finetune.py  # local two-phase fine-tune on Apple GPU (MPS) — fallback
 uv run python 03_app.py       # web app: open on your phone over WiFi, upload a photo
-uv run python 04_analysis.py  # offline calibration + robustness analysis (no Colab)
+uv run python 04_analysis.py  # offline calibration + robustness analysis
 ```
 
-For the better, larger model, train on a cloud accelerator and download the
-results into `skin/results/`: `kaggle_training.ipynb` on a Kaggle **GPU** (see
-[Training on Kaggle](#training-on-kaggle)) or `colab_training.ipynb` on a Colab
-**TPU** (**Runtime → TPU → Run all**, then pull Drive's `galaxy-uq/results/skin/`).
-To experiment, change `MODEL_NAME` / `IMG_SIZE` / the learning rates in the config
-cell — the head swap and freeze logic are generic, so any torchvision classifier
-works.
+To (re)train, run `kaggle_training.ipynb` on a Kaggle **GPU** (see
+[Training on Kaggle](#training-on-kaggle)) and download the results into
+`skin/results/`. To search hyperparameters, run `kaggle_sweep.ipynb` (a W&B
+sweep). Change `MODEL_NAME` / `IMG_SIZE` in the config cell to try another
+backbone — the head-swap and freeze logic are generic.
 
 Tests (run from the repo root):
 
@@ -409,20 +407,41 @@ uv run pytest skin/tests/
 
 ```
 skin/
+├── README.md             # this file
+├── CLINICAL_REPORT.md    # clinically-honest evaluation (melanoma sensitivity)
+├── CHANGELOG.md          # why the analysis evolved (read to catch up)
+├── skin_model.py         # shared helpers: head-swap, model rebuild, preprocessing, entropy
+│
 ├── 01_data.py            # stream HAM10000 subset from Hugging Face -> data/
 ├── 02_finetune.py        # local EfficientNet-B0 fine-tune on Apple GPU (fallback)
 ├── 03_app.py             # Gradio web app (reads results/model_config.json)
-├── 04_analysis.py        # offline calibration + robustness analysis
-├── skin_model.py         # shared helpers: head-swap, model rebuild, preprocessing, entropy
-├── kaggle_training.ipynb # Kaggle GPU training (local HAM10000 dataset; lesion-grouped split)
-├── colab_training.ipynb  # Colab TPU training (streams from HF; architecture-agnostic)
+├── 04_analysis.py        # calibration, bootstrap CI, temperature scaling, error analysis
+├── 05_visualize.py       # Grad-CAM, t-SNE, soft-confusion visualisations
+├── 06_wandb_backfill.py  # push past runs into Weights & Biases
+├── 07_wandb_eval.py      # rich W&B eval: interactive prediction table, ROC/PR
+├── 08_clinical.py        # clinical metrics -> CLINICAL_REPORT.md figures
+├── 09_wandb_report.py    # assemble a W&B Report from the runs
+│
+├── kaggle_training.ipynb # MAIN training (Kaggle GPU; sweep-tuned, W&B logging)
+├── kaggle_sweep.ipynb    # W&B hyperparameter sweep (Bayesian + Hyperband)
+├── kaggle_bakeoff*.ipynb # architecture comparison (how B3 was chosen) — historical
+│
 ├── tests/                # unit tests for the shared helpers
 ├── data/                 # train/ and val/ image folders (gitignored)
-└── results/              # checkpoints, configs, logs (gitignored)
-    └── figures/          # analysis figures (git-tracked)
+└── results/              # ⭐ B3 model of record + configs/logs (gitignored)
+    ├── figures/          # git-tracked, grouped by theme:
+    │   ├── performance/      # confusion matrix, per-class F1, training curves
+    │   ├── calibration/      # reliability, temperature scaling, entropy split
+    │   ├── robustness/       # accuracy/uncertainty under perturbation
+    │   ├── clinical/         # sensitivity, melanoma ROC, referral, missed cases
+    │   └── interpretability/ # Grad-CAM, t-SNE
+    ├── hpo/              # W&B sweep summary + plots (git-tracked)
+    ├── bakeoff/          # architecture-bakeoff results (git-tracked)
+    └── archive_*/        # previous models, kept for comparison/evolution
 ```
 
-`data/` and most of `results/` are gitignored (large / regenerable); only
-`results/figures/` is tracked. The app reads `results/model_config.json` to
-rebuild whatever architecture was trained, so it adapts to any backbone with no
-code changes.
+`data/` and the model checkpoints in `results/` are gitignored (large /
+regenerable); the small artefacts — `results/figures/`, `hpo/`, `bakeoff/` — are
+tracked. The app reads `results/model_config.json` to rebuild whatever
+architecture is promoted, so it adapts to any backbone with no code changes. See
+[`../STRUCTURE.md`](../STRUCTURE.md) for the whole-repo map.

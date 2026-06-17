@@ -33,11 +33,9 @@ galaxy-uq/
     ├── 08_clinical.py       ← clinical metrics → CLINICAL_REPORT.md figures
     ├── 09_wandb_report.py   ← assemble a W&B Report from the runs
     │
-    ├── kaggle_training.ipynb     ← MAIN training notebook (Kaggle GPU); tuned HPs
-    ├── kaggle_sweep.ipynb        ← W&B hyperparameter sweep (replaces Optuna)
-    ├── colab_training.ipynb      ← same training recipe on Colab TPU
+    ├── kaggle_training.ipynb     ← MAIN training notebook (Kaggle GPU); sweep-tuned HPs
+    ├── kaggle_sweep.ipynb        ← W&B hyperparameter sweep (Bayesian + Hyperband)
     ├── kaggle_bakeoff*.ipynb     ← architecture comparison (how B3 was chosen) — historical
-    ├── kaggle_hpo.ipynb          ← earlier Optuna HPO attempt — superseded by the sweep
     │
     ├── data/                 ← HAM10000 subset (gitignored)
     ├── tests/                ← pytest
@@ -57,7 +55,7 @@ galaxy-uq/
   `cd skin && uv run python 04_analysis.py`. Point them at a different checkpoint
   with `SKIN_MODEL_DIR=results/archive_... uv run python 04_analysis.py`.
 - **Tests** (both projects) from the repo root: `uv run pytest`.
-- **Training** happens on Kaggle/Colab GPUs, not locally — open the notebooks
+- **Training** happens on Kaggle GPUs, not locally — open the notebooks
   above. Trained artefacts are downloaded back into `skin/results/`.
 
 ## The numbered skin scripts are a pipeline
@@ -65,8 +63,9 @@ galaxy-uq/
 Read `01 → 09` roughly in order: prepare data, train (notebooks), serve
 (`03_app`), then the evaluation/uncertainty/clinical analyses (`04`, `05`, `08`)
 and the experiment-tracking helpers (`06`, `07`, `09`). Files marked *historical*
-or *superseded* are kept deliberately — they show how the project evolved
-(architecture bake-off → best model → hyperparameter sweep → rigorous evaluation).
+(the architecture bake-off) are kept deliberately — they show how the project
+evolved: architecture bake-off → best model → hyperparameter sweep → rigorous
+evaluation.
 
 ## What's gitignored
 

@@ -39,7 +39,10 @@ SKIN = Path(__file__).resolve().parent
 VAL_DIR = SKIN / "data" / "val"
 RESULTS = SKIN / "results"
 FIG_DIR = RESULTS / "figures"
-FIG_DIR.mkdir(parents=True, exist_ok=True)
+PERF_DIR = FIG_DIR / "performance"        # training curves, soft-confusion heatmap
+INTERP_DIR = FIG_DIR / "interpretability"  # Grad-CAM, t-SNE
+for _d in (PERF_DIR, INTERP_DIR):
+    _d.mkdir(parents=True, exist_ok=True)
 
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 model, CLASSES, CFG = load_trained_model(RESULTS, device)
@@ -106,7 +109,7 @@ def plot_training_curves() -> None:
     ax1.set_title(f"Learning curve — {CFG['model']} @ {IMG_SIZE}px "
                   f"(best val bal-acc {max(bal):.3f})")
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "training_curves.png", dpi=130, bbox_inches="tight")
+    fig.savefig(PERF_DIR / "training_curves.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     print("saved training_curves.png")
 
@@ -166,7 +169,7 @@ def plot_gradcam() -> None:
     fig.suptitle("Grad-CAM — image regions driving the prediction (red = most influential)",
                  fontsize=12)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "gradcam.png", dpi=130, bbox_inches="tight")
+    fig.savefig(INTERP_DIR / "gradcam.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     model.to(device)  # restore
     print("saved gradcam.png")
@@ -221,7 +224,7 @@ def plot_tsne(feats, targs) -> None:
                  "tight, separated clusters = the model has learned to tell classes apart")
     ax.legend(loc="best", fontsize=8, framealpha=0.9)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "feature_tsne.png", dpi=130, bbox_inches="tight")
+    fig.savefig(INTERP_DIR / "feature_tsne.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     print("saved feature_tsne.png")
 
@@ -242,7 +245,7 @@ def plot_prob_heatmap(probs, targs) -> None:
     ax.set_title("Mean predicted probability per true class\n"
                  "(diagonal = confidence on correct class; off-diagonal = where it leaks)")
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "prob_heatmap.png", dpi=130, bbox_inches="tight")
+    fig.savefig(PERF_DIR / "prob_heatmap.png", dpi=130, bbox_inches="tight")
     plt.close(fig)
     print("saved prob_heatmap.png")
 

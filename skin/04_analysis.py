@@ -53,6 +53,11 @@ SKIN = Path(__file__).resolve().parent
 VAL_DIR = SKIN / "data" / "val"
 RESULTS = SKIN / "results"
 FIG_DIR = RESULTS / "figures"
+# Figures are grouped by theme (mirrors the README sections) so the folder is
+# navigable: performance/, calibration/, robustness/, clinical/, interpretability/.
+PERF_DIR = FIG_DIR / "performance"
+CAL_DIR = FIG_DIR / "calibration"
+ROB_DIR = FIG_DIR / "robustness"
 BATCH_SIZE = 32
 
 # Which checkpoint to analyse. Defaults to the canonical results/ model, but set
@@ -194,7 +199,8 @@ def fit_temperature(logits, targets, max_iter=200):
 
 
 def main() -> None:
-    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    for d in (PERF_DIR, CAL_DIR, ROB_DIR):
+        d.mkdir(parents=True, exist_ok=True)
     print(f"Model: {CFG['model']} @ {IMG_SIZE}px on {device}")
 
     # Clean pass returns logits (temperature scaling needs them); probs derived.
@@ -225,7 +231,7 @@ def main() -> None:
     ax.legend(loc="lower right", fontsize=9)
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "per_class_f1.png", dpi=150)
+    fig.savefig(PERF_DIR / "per_class_f1.png", dpi=150)
     plt.close(fig)
 
     # 1b) Confusion matrix (row-normalised) ----------------------------------
@@ -243,7 +249,7 @@ def main() -> None:
     ax.set_title(f"Confusion matrix (val, row-normalised) — bal-acc {bal_acc:.3f}")
     fig.colorbar(im, fraction=0.046, pad=0.04)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "confusion_matrix.png", dpi=150)
+    fig.savefig(PERF_DIR / "confusion_matrix.png", dpi=150)
     plt.close(fig)
 
     # 2) Reliability diagram + ECE -------------------------------------------
@@ -266,7 +272,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "reliability.png", dpi=150)
+    fig.savefig(CAL_DIR / "reliability.png", dpi=150)
     plt.close(fig)
 
     # 2b) Temperature scaling (post-hoc calibration) -------------------------
@@ -302,7 +308,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "calibration_temperature.png", dpi=150)
+    fig.savefig(CAL_DIR / "calibration_temperature.png", dpi=150)
     plt.close(fig)
 
     # 3) Predictive entropy, correct vs incorrect ----------------------------
@@ -319,7 +325,7 @@ def main() -> None:
     ax.legend(fontsize=9)
     ax.grid(alpha=0.3)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "uncertainty_split.png", dpi=150)
+    fig.savefig(CAL_DIR / "uncertainty_split.png", dpi=150)
     plt.close(fig)
     mean_ent_correct = float(ent[correct_mask].mean())
     mean_ent_incorrect = float(ent[~correct_mask].mean()) if (~correct_mask).any() else float("nan")
@@ -363,7 +369,7 @@ def main() -> None:
                          f"({conf[i]:.0%})", fontsize=8, color="#b91c1c")
         fig.suptitle("Most confident mistakes (the failures that matter)", fontsize=12)
         fig.tight_layout()
-        fig.savefig(FIG_DIR / "confident_errors.png", dpi=150)
+        fig.savefig(PERF_DIR / "confident_errors.png", dpi=150)
         plt.close(fig)
 
     # 4) Robustness under shift ----------------------------------------------
@@ -400,7 +406,7 @@ def main() -> None:
     ax2.legend(fontsize=9)
     fig.suptitle("Calibrated uncertainty under perturbation", fontsize=12)
     fig.tight_layout()
-    fig.savefig(FIG_DIR / "robustness.png", dpi=150)
+    fig.savefig(ROB_DIR / "robustness.png", dpi=150)
     plt.close(fig)
 
     # --- metrics summary ----------------------------------------------------

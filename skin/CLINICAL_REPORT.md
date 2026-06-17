@@ -29,7 +29,7 @@ detection as a screening problem, and the dangerous misses.
 
 ## 1. Per-class sensitivity — strong everywhere except where it matters most
 
-![Per-class sensitivity](results/figures/clinical_sensitivity.png)
+![Per-class sensitivity](results/figures/clinical/clinical_sensitivity.png)
 
 Sensitivity = "of all true cases of this class, what fraction did we catch?"
 The model is excellent on six of seven classes — and a glaring outlier on the
@@ -54,7 +54,7 @@ suspicious.
 
 ## 2. Melanoma detection is a *threshold* problem, not a *model* problem
 
-![Melanoma ROC](results/figures/clinical_melanoma_roc.png)
+![Melanoma ROC](results/figures/clinical/clinical_melanoma_roc.png)
 
 Treating melanoma as one-vs-rest, the **ROC AUC is 0.977** — near-perfect ranking
 of melanomas above non-melanomas. The signal is there. The only issue is the
@@ -74,7 +74,7 @@ only a threshold change.
 
 ## 3. "Refer or reassure?" — the screening view
 
-![Referral screen](results/figures/clinical_referral.png)
+![Referral screen](results/figures/clinical/clinical_referral.png)
 
 Collapse the 7 classes into **concerning** (melanoma, basal cell carcinoma,
 actinic keratoses) vs **benign** — *should this lesion see a doctor?* Separation
@@ -93,7 +93,7 @@ the safe operating regime.
 
 ## 4. The dangerous misses
 
-![Missed melanomas](results/figures/clinical_missed.png)
+![Missed melanomas](results/figures/clinical/clinical_missed.png)
 
 The 44 melanomas the model called benign. The dominant confident-error pair, from
 the calibration analysis, is unambiguous:

@@ -96,7 +96,7 @@ def main() -> None:
 
     run = wandb.init(
         project=PROJECT,
-        name="eval_efficientnet_v2_s",
+        name=f"eval_{CFG['model']}",
         job_type="evaluation",
         config={"model": CFG["model"], "img_size": IMG_SIZE, "n_val": len(targets)},
     )
@@ -140,11 +140,12 @@ def main() -> None:
 
     # (4) The analysis PNGs gathered into one media gallery, side by side.
     figures = [
-        "reliability.png", "robustness.png", "uncertainty_split.png",
-        "per_class_f1.png", "gradcam.png", "prob_heatmap.png",
+        "calibration/reliability.png", "robustness/robustness.png",
+        "calibration/uncertainty_split.png", "performance/per_class_f1.png",
+        "interpretability/gradcam.png", "performance/prob_heatmap.png",
     ]
     gallery = [
-        wandb.Image(str(FIG_DIR / f), caption=f[:-4])
+        wandb.Image(str(FIG_DIR / f), caption=Path(f).stem)
         for f in figures
         if (FIG_DIR / f).exists()
     ]

@@ -5,7 +5,7 @@ missing a melanoma (a false negative on a deadly cancer) is far worse than
 mistaking one benign lesion for another. This script re-scores the same trained
 model and val set through that lens and writes a standalone report.
 
-It produces, in ``skin/results/figures/``:
+It produces, in ``skin/results/figures/clinical/``:
   - ``clinical_sensitivity.png``   per-class recall (sensitivity), danger classes flagged
   - ``clinical_melanoma_roc.png``  melanoma-vs-rest ROC with a high-sensitivity operating point
   - ``clinical_referral.png``      "refer vs reassure" screening confusion + threshold sweep
@@ -42,6 +42,7 @@ SKIN = Path(__file__).resolve().parent
 VAL_DIR = SKIN / "data" / "val"
 RESULTS = SKIN / "results"
 FIG_DIR = RESULTS / "figures"
+CLIN_DIR = FIG_DIR / "clinical"
 
 # Clinical risk tiers (see README risk table). "Concerning" = anything a
 # screening tool should flag for a dermatologist; benign = safe to reassure.
@@ -81,7 +82,7 @@ def sens_spec_at(scores, positive, thresh):
 
 
 def main() -> None:
-    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    CLIN_DIR.mkdir(parents=True, exist_ok=True)
     base_ds = datasets.ImageFolder(VAL_DIR)
     paths = [p for p, _ in base_ds.samples]
     ds = datasets.ImageFolder(VAL_DIR, transform=val_transform(CFG["img_size"]))
@@ -105,7 +106,7 @@ def main() -> None:
     ax.set_xlabel("Sensitivity (recall) — fraction of this class correctly caught")
     ax.set_title("Per-class sensitivity (red = malignant / pre-cancerous)")
     ax.grid(axis="x", alpha=0.3)
-    fig.tight_layout(); fig.savefig(FIG_DIR / "clinical_sensitivity.png", dpi=150); plt.close(fig)
+    fig.tight_layout(); fig.savefig(CLIN_DIR / "clinical_sensitivity.png", dpi=150); plt.close(fig)
 
     # 2) melanoma-vs-rest ROC + operating point -----------------------------
     mel = cidx["melanoma"]
@@ -129,7 +130,7 @@ def main() -> None:
     ax.set_ylabel("True positive rate (sensitivity)")
     ax.set_title(f"Melanoma detection (one-vs-rest), threshold={op_thr:.2f}")
     ax.legend(loc="lower right", fontsize=9); ax.grid(alpha=0.3)
-    fig.tight_layout(); fig.savefig(FIG_DIR / "clinical_melanoma_roc.png", dpi=150); plt.close(fig)
+    fig.tight_layout(); fig.savefig(CLIN_DIR / "clinical_melanoma_roc.png", dpi=150); plt.close(fig)
 
     # 3) referral screen: concerning (malignant/pre-cancerous) vs benign -----
     conc_idx = [cidx[c] for c in CONCERNING]
@@ -163,7 +164,7 @@ def main() -> None:
                      color="white" if scm[r, cc] > scm.max() / 2 else "black")
     axR.set_xlabel("Model decision (argmax)"); axR.set_ylabel("Truth")
     axR.set_title(f"Screen @ argmax — sens {a_sens:.2f}, spec {a_spec:.2f}")
-    fig.tight_layout(); fig.savefig(FIG_DIR / "clinical_referral.png", dpi=150); plt.close(fig)
+    fig.tight_layout(); fig.savefig(CLIN_DIR / "clinical_referral.png", dpi=150); plt.close(fig)
 
     # 4) the dangerous misses: true melanomas predicted benign ---------------
     benign_idx = [i for i, c in enumerate(CLASSES) if c not in CONCERNING]
@@ -180,7 +181,7 @@ def main() -> None:
             ax.set_title(f"melanoma called\n{SHORT[preds[i]]} ({probs[i].max():.0%})",
                          fontsize=8, color="#b91c1c")
         fig.suptitle("Missed melanomas (true melanoma predicted benign)", fontsize=12)
-        fig.tight_layout(); fig.savefig(FIG_DIR / "clinical_missed.png", dpi=150); plt.close(fig)
+        fig.tight_layout(); fig.savefig(CLIN_DIR / "clinical_missed.png", dpi=150); plt.close(fig)
 
     metrics = {
         "model": CFG["model"], "img_size": CFG["img_size"], "n_val": int(len(targets)),
