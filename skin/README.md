@@ -14,8 +14,31 @@ how they behave when the image is degraded.
 
 ---
 
+## ⭐ Model of record — EfficientNet-B3 @ 300px
+
+The promoted model (loaded by default from `results/`) is **EfficientNet-B3 @
+300px**, the best of several architectures we trialled. It is what the app and
+analysis scripts use unless you override `SKIN_MODEL_DIR`.
+
+| | |
+|---|---|
+| Architecture | EfficientNet-B3 (ImageNet → HAM10000) @ 300px |
+| Val balanced accuracy | **0.874** (95% CI [0.852, 0.896]) on the local split |
+| Calibration (ECE) | 0.048 (→ 0.040 with temperature scaling) |
+| Melanoma AUC | **0.977** |
+| ⚠️ Clinical caveat | melanoma sensitivity is only **0.45 at argmax** — see [`CLINICAL_REPORT.md`](CLINICAL_REPORT.md) |
+
+Hyperparameters came from a Weights & Biases sweep
+([`results/hpo/`](results/hpo/)). Previous models are kept under
+`results/archive_*` for comparison. **New here?** Read
+[`../STRUCTURE.md`](../STRUCTURE.md) for the repo map and
+[`CHANGELOG.md`](CHANGELOG.md) for how the analysis evolved.
+
+---
+
 ## Table of contents
 
+- [Model of record](#-model-of-record--efficientnet-b3--300px)
 - [The task](#the-task)
 - [Dataset](#dataset)
 - [Model architecture](#model-architecture)

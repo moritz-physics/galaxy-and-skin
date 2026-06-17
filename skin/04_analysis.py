@@ -7,13 +7,18 @@ predicted probabilities *calibrated*, and how does confidence behave when the
 input is *perturbed*?
 
 Produces, in ``skin/results/figures/``:
-  - ``per_class_f1.png``       per-class precision / recall / F1
-  - ``confusion_matrix.png``   row-normalised confusion matrix
-  - ``reliability.png``        reliability diagram + Expected Calibration Error
-  - ``uncertainty_split.png``  predictive entropy, correct vs. incorrect
-  - ``robustness.png``         balanced accuracy & mean uncertainty under shift
+  - ``per_class_f1.png``            per-class precision / recall / F1
+  - ``confusion_matrix.png``        row-normalised confusion matrix
+  - ``reliability.png``             reliability diagram + Expected Calibration Error
+  - ``calibration_temperature.png`` reliability before/after temperature scaling
+  - ``uncertainty_split.png``       predictive entropy, correct vs. incorrect
+  - ``confident_errors.png``        the most confident *wrong* predictions
+  - ``robustness.png``              balanced accuracy & mean uncertainty under shift
 
-and a metrics summary at ``skin/results/analysis_metrics.json``.
+and a metrics summary at ``skin/results/analysis_metrics.json`` that now also
+carries a bootstrap 95% CI on balanced accuracy, the fitted temperature and
+before/after ECE, and a tally of the confident-error class pairs (see
+CHANGELOG.md, Tier-1 rigor pass).
 
 Run:  cd skin && uv run python 04_analysis.py
 """
@@ -21,6 +26,7 @@ Run:  cd skin && uv run python 04_analysis.py
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -30,6 +36,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from sklearn.metrics import (
     balanced_accuracy_score,
@@ -48,8 +55,14 @@ RESULTS = SKIN / "results"
 FIG_DIR = RESULTS / "figures"
 BATCH_SIZE = 32
 
+# Which checkpoint to analyse. Defaults to the canonical results/ model, but set
+# SKIN_MODEL_DIR to point at any checkpoint folder (e.g. an archived best model)
+# while figures/metrics still write to the canonical results/ location. Example:
+#   SKIN_MODEL_DIR=results/archive_efficientnet_b3 uv run python 04_analysis.py
+MODEL_DIR = Path(os.environ.get("SKIN_MODEL_DIR", RESULTS))
+
 device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
-model, CLASSES, CFG = load_trained_model(RESULTS, device)
+model, CLASSES, CFG = load_trained_model(MODEL_DIR, device)
 IMG_SIZE = CFG["img_size"]
 SHORT = [c.replace("_", " ").replace("-like lesions", "") for c in CLASSES]
 
@@ -84,6 +97,18 @@ def run_inference(loader) -> tuple[np.ndarray, np.ndarray]:
         all_probs.append(torch.softmax(logits, dim=1).cpu().numpy())
         all_targets.append(y.numpy())
     return np.concatenate(all_probs), np.concatenate(all_targets)
+
+
+@torch.no_grad()
+def run_inference_logits(loader) -> tuple[np.ndarray, np.ndarray]:
+    """Return (logits [N, C], targets [N]). Temperature scaling needs the raw
+    logits, not the softmax probabilities, so this is the clean-pass variant."""
+    model.eval()
+    all_logits, all_targets = [], []
+    for x, y in loader:
+        all_logits.append(model(x.to(device)).cpu().numpy())
+        all_targets.append(y.numpy())
+    return np.concatenate(all_logits), np.concatenate(all_targets)
 
 
 # --- perturbations (act on a [0,1] CHW tensor) -------------------------------
@@ -130,15 +155,57 @@ def expected_calibration_error(probs, targets, n_bins=15):
     return ece, bins
 
 
+# --- Tier-1 rigor helpers (added 2026-06-17, see CHANGELOG.md) ---------------
+def bootstrap_balanced_accuracy_ci(targets, preds, n_boot=2000, alpha=0.05, seed=0):
+    """Percentile bootstrap 95% CI for balanced accuracy.
+
+    A single val split gives one point estimate; resampling the val set with
+    replacement and recomputing the metric many times shows how much of that
+    number is sampling noise. Two models whose CIs overlap are not meaningfully
+    different — this is the guard against over-reading a 0.5% gap."""
+    rng = np.random.default_rng(seed)
+    n = len(targets)
+    stats = np.empty(n_boot)
+    for b in range(n_boot):
+        idx = rng.integers(0, n, n)
+        stats[b] = balanced_accuracy_score(targets[idx], preds[idx])
+    lo, hi = np.percentile(stats, [100 * alpha / 2, 100 * (1 - alpha / 2)])
+    return float(lo), float(hi), float(stats.std())
+
+
+def fit_temperature(logits, targets, max_iter=200):
+    """Fit a single scalar temperature T that minimises NLL of softmax(logits / T)
+    (Guo et al., 2017). T > 1 softens over-confident logits. Accuracy is unchanged
+    (argmax is scale-invariant); only the *calibration* of the probabilities moves.
+    Must be fit on a calibration split that is NOT used to report the final ECE."""
+    lt = torch.tensor(logits, dtype=torch.float32)
+    yt = torch.tensor(targets, dtype=torch.long)
+    T = torch.nn.Parameter(torch.ones(1))
+    opt = torch.optim.LBFGS([T], lr=0.05, max_iter=max_iter)
+
+    def closure():
+        opt.zero_grad()
+        loss = F.cross_entropy(lt / T.clamp_min(1e-3), yt)
+        loss.backward()
+        return loss
+
+    opt.step(closure)
+    return float(T.detach().clamp_min(1e-3).item())
+
+
 def main() -> None:
     FIG_DIR.mkdir(parents=True, exist_ok=True)
     print(f"Model: {CFG['model']} @ {IMG_SIZE}px on {device}")
 
-    probs, targets = run_inference(make_loader())
+    # Clean pass returns logits (temperature scaling needs them); probs derived.
+    logits, targets = run_inference_logits(make_loader())
+    probs = torch.softmax(torch.tensor(logits), dim=1).numpy()
     preds = probs.argmax(axis=1)
     bal_acc = balanced_accuracy_score(targets, preds)
     acc = float((preds == targets).mean())
-    print(f"Validation: {len(targets)} images  acc {acc:.3f}  balanced acc {bal_acc:.3f}")
+    ci_lo, ci_hi, ci_std = bootstrap_balanced_accuracy_ci(targets, preds)
+    print(f"Validation: {len(targets)} images  acc {acc:.3f}  "
+          f"balanced acc {bal_acc:.3f}  (95% CI [{ci_lo:.3f}, {ci_hi:.3f}])")
 
     # 1) Per-class precision / recall / F1 -----------------------------------
     prec, rec, f1, support = precision_recall_fscore_support(
@@ -202,6 +269,42 @@ def main() -> None:
     fig.savefig(FIG_DIR / "reliability.png", dpi=150)
     plt.close(fig)
 
+    # 2b) Temperature scaling (post-hoc calibration) -------------------------
+    # Fit T on a calibration half of the val set, measure ECE on the held-out
+    # half *before* and *after* dividing the logits by T. Splitting matters: a T
+    # fit and evaluated on the same data would report an optimistically low ECE.
+    rng = np.random.default_rng(0)
+    perm = rng.permutation(len(targets))
+    half = len(perm) // 2
+    cal_idx, test_idx = perm[:half], perm[half:]
+    temperature = fit_temperature(logits[cal_idx], targets[cal_idx])
+    probs_test = probs[test_idx]
+    probs_test_cal = torch.softmax(
+        torch.tensor(logits[test_idx]) / temperature, dim=1).numpy()
+    ece_test_raw, bins_raw = expected_calibration_error(probs_test, targets[test_idx])
+    ece_test_cal, bins_cal = expected_calibration_error(probs_test_cal, targets[test_idx])
+    print(f"Temperature scaling: T={temperature:.3f}  "
+          f"ECE {ece_test_raw:.3f} -> {ece_test_cal:.3f} (held-out half)")
+
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.plot([0, 1], [0, 1], "--", color="#9ca3af", label="Perfect calibration")
+    for bins, color, lbl in [(bins_raw, "#ef4444", f"Before (ECE {ece_test_raw:.3f})"),
+                             (bins_cal, "#10b981", f"After  (ECE {ece_test_cal:.3f})")]:
+        pts = [(c, a) for c, a, _ in bins if not np.isnan(a)]
+        if pts:
+            xs, ys = zip(*pts)
+            ax.plot(xs, ys, marker="o", color=color, label=lbl)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_xlabel("Confidence (mean predicted probability)")
+    ax.set_ylabel("Accuracy")
+    ax.set_title(f"Temperature scaling (T={temperature:.2f}) — held-out half")
+    ax.legend(loc="upper left", fontsize=9)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(FIG_DIR / "calibration_temperature.png", dpi=150)
+    plt.close(fig)
+
     # 3) Predictive entropy, correct vs incorrect ----------------------------
     ent = np.array([normalized_entropy(p) for p in probs])
     correct_mask = preds == targets
@@ -220,6 +323,48 @@ def main() -> None:
     plt.close(fig)
     mean_ent_correct = float(ent[correct_mask].mean())
     mean_ent_incorrect = float(ent[~correct_mask].mean()) if (~correct_mask).any() else float("nan")
+
+    # 3b) Confident-and-wrong error analysis ---------------------------------
+    # The dangerous failures are the *confident* mistakes, not the unsure ones.
+    # Rank wrong predictions by confidence, show the worst as a labelled grid,
+    # and tally which true->predicted class pairs dominate the high-confidence
+    # errors (conf >= 0.5). ImageFolder with the default order matches the
+    # shuffle=False loader, so `samples[i]` is the image behind prediction i.
+    from collections import Counter
+    from PIL import Image
+
+    base_ds = datasets.ImageFolder(VAL_DIR)  # paths only, same order as inference
+    paths = [p for p, _ in base_ds.samples]
+    conf = probs.max(axis=1)
+    wrong_idx = np.where(~correct_mask)[0]
+    worst = wrong_idx[np.argsort(-conf[wrong_idx])]  # most confident wrong first
+    hc_pairs = Counter(
+        (SHORT[targets[i]], SHORT[preds[i]]) for i in wrong_idx if conf[i] >= 0.5
+    )
+    confident_errors = [
+        {"path": Path(paths[i]).name, "true": CLASSES[targets[i]],
+         "pred": CLASSES[preds[i]], "confidence": float(conf[i]),
+         "entropy": float(ent[i])}
+        for i in worst[:25]
+    ]
+    print(f"Confident errors: {(conf[wrong_idx] >= 0.5).sum()} wrong with conf>=0.5; "
+          f"top confused pairs: {hc_pairs.most_common(3)}")
+
+    k = min(12, len(worst))
+    if k:
+        cols = 4
+        rows = (k + cols - 1) // cols
+        fig, axes = plt.subplots(rows, cols, figsize=(3 * cols, 3 * rows))
+        for ax in np.atleast_1d(axes).ravel():
+            ax.axis("off")
+        for ax, i in zip(np.atleast_1d(axes).ravel(), worst[:k]):
+            ax.imshow(Image.open(paths[i]).convert("RGB"))
+            ax.set_title(f"true: {SHORT[targets[i]]}\npred: {SHORT[preds[i]]} "
+                         f"({conf[i]:.0%})", fontsize=8, color="#b91c1c")
+        fig.suptitle("Most confident mistakes (the failures that matter)", fontsize=12)
+        fig.tight_layout()
+        fig.savefig(FIG_DIR / "confident_errors.png", dpi=150)
+        plt.close(fig)
 
     # 4) Robustness under shift ----------------------------------------------
     # Clean baseline at severity 0, then each corruption at severities 1..4.
@@ -265,9 +410,24 @@ def main() -> None:
         "n_val": int(len(targets)),
         "accuracy": acc,
         "balanced_accuracy": float(bal_acc),
+        "balanced_accuracy_ci95": [ci_lo, ci_hi],
+        "balanced_accuracy_boot_std": ci_std,
         "ece": float(ece),
+        "temperature_scaling": {
+            "temperature": temperature,
+            "ece_heldout_before": float(ece_test_raw),
+            "ece_heldout_after": float(ece_test_cal),
+            "note": "T fit on a 50% calibration split; ECE reported on the held-out 50%",
+        },
         "mean_entropy_correct": mean_ent_correct,
         "mean_entropy_incorrect": mean_ent_incorrect,
+        "confident_errors": {
+            "n_wrong_conf_ge_0.5": int((conf[wrong_idx] >= 0.5).sum()),
+            "top_confused_pairs": [
+                {"true": t, "pred": p, "count": c} for (t, p), c in hc_pairs.most_common(5)
+            ],
+            "worst_examples": confident_errors,
+        },
         "per_class": {
             CLASSES[i]: {
                 "precision": float(prec[i]),
@@ -280,7 +440,7 @@ def main() -> None:
         "robustness": robustness,
     }
     (RESULTS / "analysis_metrics.json").write_text(json.dumps(summary, indent=2))
-    print(f"\nSaved 5 figures to {FIG_DIR} and metrics to "
+    print(f"\nSaved figures to {FIG_DIR} and metrics to "
           f"{RESULTS / 'analysis_metrics.json'}")
 
 

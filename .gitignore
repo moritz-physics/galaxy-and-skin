@@ -6,6 +6,7 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
 
 # Virtual environments
 .venv/
@@ -36,6 +37,9 @@ skin/results/hpo/**
 !skin/results/hpo/**/*.json
 !skin/results/hpo/**/*.png
 !skin/results/hpo/**/*.md
+
+# Weights & Biases local run cache
+wandb/
 
 # Notebooks
 .ipynb_checkpoints/

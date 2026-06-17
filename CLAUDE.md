@@ -80,15 +80,16 @@ plots) — local Mac (MPS) training is too slow/crash-prone for this:
   to this notebook.
 
 Keep the two notebooks' shared logic (head-swap, freeze, two-phase loop, early stopping) in
-sync, and keep both in sync with `skin/skin_model.replace_head`. The promoted model is
-**EfficientNetV2-S @ 384px** trained on Kaggle **with the imbalance correctors on** (val
-balanced accuracy **0.829** on its lesion-grouped split; 0.731 on the local capped val set
-via `04_analysis.py`), which both notebooks default to. Two earlier checkpoints are archived
-for comparison: the plain-CE V2-S baseline (`skin/results/archive_efficientnet_v2_s_baseline/`,
-grouped-split 0.791) and EfficientNet-B3 (`skin/results/archive_efficientnet_b3/`).
-Architecture-agnostic: change `MODEL_NAME` / `IMG_SIZE` in the config cell to try ConvNeXt,
-Swin, ViT, etc. Set `FT_EPOCHS` high — `EARLY_STOP_PATIENCE` cuts it off when val stops
-improving.
+sync, and keep both in sync with `skin/skin_model.replace_head`. The **promoted model of
+record is EfficientNet-B3 @ 300px** (in `skin/results/`; local capped-val balanced accuracy
+**0.874**, melanoma AUC 0.977 — see `skin/CLINICAL_REPORT.md`), selected via the architecture
+bake-off and a W&B hyperparameter sweep. Scripts load it by default; override with
+`SKIN_MODEL_DIR=<dir>`. Earlier checkpoints are archived for comparison under
+`skin/results/archive_*` (the EfficientNetV2-S @ 384px run, grouped-split 0.829 / local 0.731;
+and a plain-CE V2-S baseline, 0.791). Architecture-agnostic: change `MODEL_NAME` / `IMG_SIZE`
+in the config cell to try ConvNeXt, Swin, ViT, etc. Set `FT_EPOCHS` high — `EARLY_STOP_PATIENCE`
+cuts it off when val stops improving. See `STRUCTURE.md` for the repo map and `skin/CHANGELOG.md`
+for how the evaluation evolved.
 
 **Class-imbalance handling (both notebooks, config-gated).** HAM10000 is ~67% melanocytic
 nevi, which biases a plain-CE model toward the majority class (the plain-CE V2-S baseline had
