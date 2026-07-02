@@ -1,0 +1,12 @@
+# Heavy derived artefacts — keep figures, drop caches.
+cache/
+*.npy
+*.npz
+*.pt
+
+# Raw per-channel renders and per-layer montages are regenerable and bulky; the
+# master montage, the analysis figures and the triangulation figure (all referenced
+# by REPORT.md) are tracked, these intermediates are not.
+figures/inceptionv1/inception*_ch*.png
+figures/inceptionv1/montage_*.png
+figures/inceptionv1/dataset_examples/*_synth.png
